@@ -1,0 +1,113 @@
+---
+title: "Select variables for dataset for Tamara"
+author: "Juan Ospina"
+date: "11/2/2018"
+output: html_document
+---
+
+```{r clean system, message=TRUE, warning=TRUE, include=FALSE}
+rm(list = ls()) # clean environment
+```
+
+```{r global options, echo=FALSE}
+knitr::opts_chunk$set(
+  # fig.path = 'figs/', fig.show = 'asis', dpi = 300, 
+  # include = FALSE, 
+  # echo = FALSE, # run the code, show me only the graphs
+  warning = FALSE, message = FALSE, cache = FALSE)
+```
+
+```{r packages}
+library(magrittr)
+library(Hmisc)
+library(RColorBrewer)
+library(reshape2)
+# library(MASS) # negative binomial models
+library(tidyverse)
+library(emmeans) # to get adjusted means and to plot the summary statistics of models
+library(kableExtra)
+library(psych)
+```
+
+```{r}
+d0 <- read_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs_Frosh_Soph_Senior.rds")
+```
+
+```{r}
+vars_id <- quos(id)
+
+vars_demogs <- 
+  quos(race_nointl_wPI_USETHIS, race_intlfirst_wPI, race, # race
+       iGender, gend, # gender
+       t1ses, ses, ses_working_lowmiddle, t1ses_workinglowermiddleclass, # SES
+       t1hsadvantage, hs_advantage, # HS status
+       mother_edu, t1mothereduc, father_edu, t1fathereduc, # parents education
+       firstgen, firstgen_reg_USETHIS # first-generation status
+  ) 
+
+vars_premat <- 
+  quos(
+    t1preReasonsIndepcomp2, t1preReasons_independent,  t1preReasons_myinterest, # Independent reasons
+    t1preReasonsInterdepcomp2, t1preReasons_familyproud, t1preReasons_community, # Interdependent reasons
+    t1opportunty_independent_comp2, t1opportunty_exploreinterests3,  t1opportunty_becomeindepthinker4, # Independent opportunities
+    t1opportunty_interdependent_comp2, t1opportunty_joincommunities1R,  t1opportunty_giveback2R, # Interdependent opportunities
+    t1friendsgoingtoSU
+  )
+
+vars_frosh <-
+  quos(
+    t4indep1, t4indep2, t4indep3, t4indep4, t4indepcomp4, # Independent opportunities
+    t4interdep1, t4interdep2, t4interdep3, t4interdep4, # Interdependent opportunities
+    t4purpose_earnmoney, t4purpose_proofcase, t4purpose_positiveimpact,  # Independent purpose
+    t4purpose_edcitizen, t4purpose_expandknowledge, t4purpose_indepthinker, t4purpose_learnabtinterests, 
+    t4purposeindepcomp7, t4purposeindepcomp5,
+    t4purpose_familyproud, t4purpose_giveback, t4purpose_helpfamily, t4purpose_rolemodel,  # Interdependent purpose
+    t4purpose_prosocialcomp3, t4purpose_prosocialcomp6,
+    t4friend_total,               t4friend_asian_count,         t4friend_black_count,        # friendship
+    t4friend_hispanic_count,      t4friend_native_count,        t4friend_white_count,        
+    t4friend_international_count, t4friend_multirace_count,     t4friend_other_count,        
+    t4friend_race_same_count,     t4friend_race_cross_count,    t4friend_asian_pct,          
+    t4friend_black_pct,           t4friend_hispanic_pct,        t4friend_native_pct,         
+    t4friend_white_pct,           t4friend_international_pct,   t4friend_multirace_pct,      
+    t4friend_other_pct,           t4friend_race_same_pct,       t4friend_race_cross_pct
+  )
+
+vars_soph <-
+  quos(
+    t5friend_total,               t5friend_asian_count,         t5friend_black_count,         t5friend_hispanic_count,     
+    t5friend_native_count,        t5friend_white_count,         t5friend_international_count, t5friend_multirace_count,    
+    t5friend_other_count,         t5friend_race_same_count,     t5friend_race_cross_count,    t5friend_asian_pct,          
+    t5friend_black_pct,           t5friend_hispanic_pct,        t5friend_native_pct,          t5friend_white_pct,          
+    t5friend_international_pct,   t5friend_multirace_pct,       t5friend_other_pct,           t5friend_race_same_pct,      
+    t5friend_race_cross_pct  
+  )
+
+vars_senior <-
+  quos(
+    qualities_indgoals, qualities_indownpath, qualities_indselfmotivated,
+    qualities_intersharedvalues, qualities_interconnected, qualities_intergenrel,                   
+    qualities_intergiveback, qualities_interothersmotivated,
+    t7friend_total,            t7friend_asian_count,      t7friend_black_count,     
+    t7friend_hispanic_count,   t7friend_native_count,     t7friend_mideast_count,   
+    t7friend_multirace_count,  t7friend_pi_count,         t7friend_white_count,     
+    t7friend_other_count,      t7friend_race_same_count,  t7friend_race_cross_count,
+    t7friend_asian_pct,       t7friend_black_pct,        t7friend_hispanic_pct,    
+    t7friend_native_pct,       t7friend_mideast_pct,      t7friend_multirace_pct,   
+    t7friend_pi_pct,           t7friend_white_pct,        t7friend_other_pct,       
+    t7friend_race_same_pct,    t7friend_race_cross_pct  
+  )
+```
+
+```{r}
+d1 <-
+  d0 %>% 
+  select(!!!vars_id, !!!vars_demogs, !!!vars_premat, !!!vars_frosh, !!!vars_soph, !!!vars_senior)
+```
+
+```{r}
+write_csv(d1, "../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs_Frosh_Soph_Senior_Tamara.csv")
+write_csv(d1, "../../../premat_intervention_jo/data_for_tamara/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs_Frosh_Soph_Senior_Tamara.csv")
+write_rds(d1, "../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs_Frosh_Soph_Senior_Tamara.rds")
+```
+
+

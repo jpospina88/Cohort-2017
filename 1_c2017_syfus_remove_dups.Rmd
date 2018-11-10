@@ -1,0 +1,86 @@
+---
+title: "Clean C2017 SYFUS"
+author: "Juan Ospina"
+date: "7/5/2018"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+    number_sections: TRUE
+---
+
+```{r clean system, message=TRUE, warning=TRUE, include=FALSE}
+rm(list = ls()) # clean environment
+```
+
+```{r global options, echo=FALSE}
+knitr::opts_chunk$set(
+  # fig.path = 'figs/', fig.show = 'asis', dpi = 300, 
+  # include = FALSE, 
+  echo = FALSE, # run the code, show me only the graphs
+  warning = FALSE, message = FALSE, cache = FALSE)
+```
+
+```{r packages}
+# install.packages(c("RColorBrewer", "reshape2", "tidyverse"))
+library(haven) # package to import SPSS files in R. Useful to import SPSS files and export them as csv
+library(magrittr)
+# library(Hmisc)
+# library(RColorBrewer)
+library(reshape2)
+library(tidyverse)
+library(kableExtra)
+library(psych)
+```
+
+```{r}
+dsy <- read_spss("../Newest Data/FIntv_2017_SYFUS_July4_2018.sav") # dsy = data senior year
+```
+
+# Check and remove duplicates
+```{r}
+# dsy %>% head
+
+# dsy %>% select(contains("email"), contains("id"), contains("sun"), contains("emp"))
+
+dsy %>% select(RecipientEmail, idnum, SUNetID) %>% head
+
+dsy %>% filter(!is.na(RecipientEmail)) %>% select(starts_with("email"))
+
+dsy %>% 
+  group_by(RecipientEmail) %>% 
+  arrange(RecipientEmail) %>% 
+  slice(1) %>% 
+  ungroup()
+
+duplicated(dsy$RecipientEmail) %>% sum
+subset(dsy, duplicated(RecipientEmail) == TRUE, select = 'RecipientEmail')
+
+# dsy %>% filter(RecipientEmail == "jpospina@stanford.edu")
+dup <- dsy %>% filter(RecipientEmail == "dienhart@stanford.edu")
+rm(dup)
+
+# dsy.c %>% filter(!is.na(RecipientEmail))
+
+blank <- dsy %>% filter(RecipientEmail == "") # blank cell instead of NA, didn't respond anything
+rm(blank)
+
+# ResponseId == R_0dDrzMC1698vDyh is removed because this is a duplicate row of dienhart@stanford.edu and has no responses.
+dsy.c <- dsy %>% filter(RecipientEmail != "jpospina@stanford.edu" & ResponseId != "R_0dDrzMC1698vDyh" & RecipientEmail != "")
+
+dsy.c %<>% 
+  mutate(sunet = str_remove(RecipientEmail, "@stanford.edu"),
+         startedSYFUS = 1)
+
+id <- dsy.c %>% select(RecipientEmail, sunet)
+rm(id)
+```
+# Export dataset
+
+Export dataset to merge with master dataset in c2017_master_cleaning in order to filter it and then compute new variables.
+
+```{r export cleaned syfus}
+write_rds(dsy.c, "../Newest Data/FIntv_2017_SYFUS_nodups.rds")
+```
+
+

@@ -1,0 +1,532 @@
+---
+title: "Analyse C2017 Spring Survey"
+author: "Juan Ospina"
+date: "7/5/2018"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+    number_sections: TRUE
+---
+
+```{r clean system, message=TRUE, warning=TRUE, include=FALSE}
+rm(list = ls()) # clean environment
+```
+
+```{r global options, echo=FALSE}
+knitr::opts_chunk$set(
+  # fig.path = 'figs/', fig.show = 'asis', dpi = 300, 
+  # include = FALSE, 
+  echo = FALSE, # run the code, show me only the graphs
+  warning = FALSE, message = FALSE, cache = FALSE)
+```
+
+```{r packages}
+library(magrittr)
+library(Hmisc)
+library(RColorBrewer)
+library(reshape2)
+# library(MASS) # negative binomial models
+library(tidyverse)
+library(emmeans) # to get adjusted means and to plot the summary statistics of models
+library(kableExtra)
+library(psych)
+```
+
+```{r}
+d.an <- read_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Filtered.rds") 
+```
+
+```{r custom functions}
+# sum_stats_round <- function(data, factors, variables) {
+#   data %>% 
+#     group_by(!!!factors) %>% 
+#     summarise(
+#       mean = round(mean(!!!variables, na.rm = TRUE), 2),
+#       sd = round(sd(!!!variables, na.rm = TRUE), 2))
+# }
+
+n_obs <- function(x) sum(!is.na(x))
+mn <- function(x) round(mean(x, na.rm = TRUE), 2)
+mdn <- function(x) median(x, na.rm = TRUE)
+std <- function(x) round(sd(x, na.rm = TRUE), 2)
+lb <- function(x) round(mean(x, na.rm = TRUE) - sd(x, na.rm = TRUE), 2)
+ub <- function(x) round(mean(x, na.rm = TRUE) + sd(x, na.rm = TRUE), 2)
+
+sum_stats_round <- function(data, factors, variables) {
+  data %>% 
+    group_by(!!!factors) %>% 
+    summarise(
+      n = n_obs(!!!variables),
+      mean = mn(!!!variables),
+      median = mdn(!!!variables),
+      sd = std(!!!variables),
+      lower = lb(!!!variables),
+      upper = ub(!!!variables))
+}
+
+sum_stats_round_new <- function(data, factors, variables) {
+  ftr <- enquo(factors)
+  var <- enquo(variables)
+  
+  data %>% 
+    group_by(!!!ftr) %>% 
+    summarise(
+      n = n_obs(!!!var),
+      mean = mn(!!!var),
+      median = mdn(!!!var),
+      sd = std(!!!var),
+      lower = lb(!!!var),
+      upper = ub(!!!var))
+}
+
+sum_stats_round_new2 <- function(data, factor1, factor2, variable) {
+  ftr1 <- enquo(factor1)
+  ftr2 <- enquo(factor2)
+  var <- enquo(variable)
+  
+  data %>% 
+    group_by(!!!ftr1, !!!ftr2) %>% 
+    summarise(
+      n = n_obs(!!!var),
+      mean = mn(!!!var),
+      median = mdn(!!!var),
+      sd = std(!!!var),
+      lower = lb(!!!var),
+      upper = ub(!!!var))
+}
+
+geom_flat_violin <-
+  function(mapping = NULL,
+           data = NULL,
+           stat = "ydensity",
+           position = "dodge",
+           trim = TRUE,
+           scale = "area",
+           show.legend = NA,
+           inherit.aes = TRUE,
+           ...) {
+    ggplot2::layer(
+      data = data,
+      mapping = mapping,
+      stat = stat,
+      geom = GeomFlatViolin,
+      position = position,
+      show.legend = show.legend,
+      inherit.aes = inherit.aes,
+      params = list(trim = trim,
+                    scale = scale,
+                    ...)
+    )
+  }
+
+GeomFlatViolin <-
+  ggproto(
+    "GeomFlatViolin",
+    Geom,
+    setup_data = function(data, params) {
+      data$width <- data$width %||%
+        params$width %||% (resolution(data$x, FALSE) * 0.9)
+      
+      # ymin, ymax, xmin, and xmax define the bounding rectangle for each group
+      data %>%
+        dplyr::group_by(.data = ., group) %>%
+        dplyr::mutate(
+          .data = .,
+          ymin = min(y),
+          ymax = max(y),
+          xmin = x,
+          xmax = x + width / 2
+        )
+    },
+    
+    draw_group = function(data, panel_scales, coord)
+    {
+      # Find the points for the line to go all the way around
+      data <- base::transform(data,
+                              xminv = x,
+                              xmaxv = x + violinwidth * (xmax - x))
+      
+      # Make sure it's sorted properly to draw the outline
+      newdata <-
+        base::rbind(
+          dplyr::arrange(.data = base::transform(data, x = xminv), y),
+          dplyr::arrange(.data = base::transform(data, x = xmaxv), -y)
+        )
+      
+      # Close the polygon: set first and last point the same
+      # Needed for coord_polar and such
+      newdata <- rbind(newdata, newdata[1,])
+      
+      ggplot2:::ggname("geom_flat_violin",
+                       GeomPolygon$draw_panel(newdata, panel_scales, coord))
+    },
+    
+    draw_key = draw_key_polygon,
+    
+    default_aes = ggplot2::aes(
+      weight = 1,
+      colour = "grey20",
+      fill = "white",
+      size = 0.5,
+      alpha = NA,
+      linetype = "solid"
+    ),
+    
+    required_aes = c("x", "y")
+  )
+```
+
+```{r raincloud plots custom functions}
+plot_raincloud <- function(data, factor, variable) {
+  ftr <- enquo(factor)
+  var <- enquo(variable)
+  
+  data %>% 
+    ggplot(aes_(y = var, x = ftr, fill = ftr)) +
+    raincloud_violin +
+    geom_point(aes_(y = var, color = ftr), 
+               position = position_jitter(width = .15), size = .5, alpha = 0.8) +
+    stat_summary_se + raincloud_boxplot + raincloud_guides + raincloud_theme_light + raincloud_theme +
+    labs(x = "Condition", fill = "Condition")
+}
+
+# Example:
+# d %>% 
+# ggplot(aes(y = healthmosoverall_comp5, x = treat, fill = treat)) +
+#   raincloud_violin +
+#   geom_point(aes(y = healthmosoverall_comp5, color = treat), 
+#              position = position_jitter(width = .15), size = .5, alpha = 0.8) +
+#   geom_point(data = sum_stats_healthmosoverall_comp5_treat, aes(x = treat, y = mean),
+#              position = position_nudge(x = 0.3), size = 1.5) +
+#   stat_summary_se + raincloud_boxplot + raincloud_guides + raincloud_theme_light + raincloud_theme +
+#   facet_grid(~ disadv) +
+#   labs(x = "Condition", y = "Overall physical health", fill = "Condition")
+
+
+raincloud_point <- function(data, factor, mn) {
+  ftr <- enquo(factor)
+  mn <- enquo(mn)
+  
+geom_point(data = data, aes_(x = ftr, y = mn), 
+             position = position_nudge(x = 0.3), size = 1.5)
+}
+
+raincloud_theme <- 
+  theme(text = element_text(size = 10),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        axis.text = element_text(size = 10),
+        axis.text.x = element_text(angle = 0, vjust = 0),
+        legend.title = element_text(size = 16),
+        legend.text = element_text(size = 16),
+        legend.position = "right",
+        plot.title = element_text(lineheight = .8, face = "bold", size = 16),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line.x = element_line(colour = 'black', size = 0.5, linetype = 'solid'),
+        axis.line.y = element_line(colour = 'black', size = 0.5, linetype = 'solid'),
+        strip.text = element_text(color = "Black"), strip.background = element_blank())
+
+raincloud_boxplot <-
+  geom_boxplot(width = .1, guides = FALSE, outlier.shape = NA, alpha = 0.5)
+
+raincloud_guides <- 
+  guides(fill = FALSE, color = FALSE)
+  
+raincloud_theme_light <- 
+  theme_light()
+
+raincloud_violin <- 
+  geom_flat_violin(position = position_nudge(x = .2, y = 0), alpha = .8)
+
+stat_summary_se <- 
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = .1, position = position_nudge(x = .3, y = 0))
+```
+
+```{r bar plot settings}
+# These elements are not going to change from plot to plot, so I added them here so we don't have to copy paste unnecesary code
+pd1 <- position_dodge()
+pd2 <- position_dodge(0.1)
+pd3 <- position_dodge(width = 0.9)
+black1 <- element_text(color = "White")
+black2 <- element_rect(fill = "black", colour = "Black", size = NULL, linetype = NULL, color = "Black", inherit.blank = FALSE)
+
+theme <- theme(strip.text = black1, strip.background = black2, axis.text = element_text(size = 14),
+        axis.title = element_text(size = 14), strip.text.x = element_text(size = 14, colour = "white"), # "colour" changes the color of the facets
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+theme.cond <- theme(strip.text = black1, strip.background = black2, axis.text = element_text(size = 11),
+        axis.title = element_text(size = 14), strip.text.x = element_text(size = 14, colour = "white"),
+         panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+theme1 <- theme_light()
+# theme1 <- theme_classic()
+# theme1 <- theme_linedraw()
+# theme1 <- theme_minimal()
+# theme1 <- theme_void()
+
+guides_no <- guides(fill = FALSE)
+pd4 <- position_stack(vjust = 1.1)
+
+color_cd_purp <- scale_fill_manual("legend", values = c("ctl" = "salmon", "purp" = "#56B4E9"))
+
+color_treat <- scale_fill_manual("legend", values = c("ctl" = "salmon", "treat" = "#56B4E9")) # add only to graphs between treatment and control
+
+positions_treat <- c("ctl", "treat")
+labels_treat <- scale_x_discrete(labels = c('Control','Treatment'), limits = positions_treat)
+
+positions_cd_purp <- c("ctl", "purp")
+labels_cd_purp <- scale_x_discrete(labels = c('Control','Purpose'), limits = positions_cd_purp)
+
+positions_cond <- c("ctl", "bel", "cul", "wf")
+
+labels_cond <- scale_x_discrete(labels = c('Control', 'Belonging','Culture', 'Wise\nFeedback'), limits = positions_cond)
+
+color_cond <- scale_fill_manual("legend", values = c("ctl" = "#F8766D", "bel" = "#7CAE00", "cul" = "#00BFC4", "wf" = "#C77CFF"))
+
+adv_names <- 
+  c('adv'="Advantaged",
+    'disadv'="Disadvantaged")
+
+gend_names <- 
+  c('m'="Male",
+    'f'="Female")
+
+# Scales
+scale_y_4 <- scale_y_continuous(breaks = seq(1, 4, 1))
+scale_y_5 <- scale_y_continuous(breaks = seq(1, 5, 1))
+scale_y_7 <- scale_y_continuous(breaks = seq(1, 7, 1))
+scale_y_10 <- scale_y_continuous(breaks = seq(1, 10, 1))
+scale_y_100 <- scale_y_continuous(breaks = seq(1, 100, 20))
+scale_y_50 <- scale_y_continuous(breaks = seq(1, 50, 10))
+scale_y_z <- scale_y_continuous(breaks = seq(-1, 1, 0.25))
+
+coord_cartesian_4 <- coord_cartesian(ylim = c(0, 4))
+coord_cartesian_5 <- coord_cartesian(ylim = c(1, 5))
+coord_cartesian_7 <- coord_cartesian(ylim = c(1, 7))
+coord_cartesian_10 <- coord_cartesian(ylim = c(1, 10))
+coord_cartesian_z <- coord_cartesian(ylim = c(-1, 1))
+
+mean_round3 <- geom_text(aes(label = format(emmean, digits = 3), y = 1))
+mean_round_gpa <- geom_text(aes(label = format(emmean, digits = 3), y = .2))
+mean_roundz <- geom_text(aes(label = format(emmean, digits = 2), y = -.5))
+
+error_bar <- geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = .2, position = pd2)
+```
+
+```{r bar plot functions }
+plot_bar_x_y <- function(data = data, x_var = x_var, x_labels = x_labels, x_color = x_color,
+                               y_var = y_var, labs_y = labs_y,
+                               scale = scale, coord_cartesian = coord_cartesian, mean_round = mean_round) {
+x_var <- enquo(x_var)
+y_var <- enquo(y_var)
+
+data %>%
+  ggplot(aes(x = !!x_var, y = !!y_var, fill = !!x_var, group = !!x_var)) +
+  geom_bar(position = pd1, stat = "identity") + error_bar + theme1 + theme + guides_no + mean_round +
+  coord_cartesian + scale + # this is where you change the scale
+  x_labels + x_color + labs_y
+}
+
+# plot_bar_x_y(data = sum_stats, x_var = cd_purp_ec, x_labels = labels_cd_purp, 
+#                    x_color = color_cd_purp,
+#                    y_var = emmean, labs_y = labs(x = "", y = "Belonging at College"),
+#                    scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+
+# Example:
+# You can use this code as long as you get the sum_stats of any model by any two catgorical variables (e.g. condition and disadvantaged status or condition and gender, or condition and race) by condition and disadvatanged status
+# plot_bar_purp_gend(sum_stats, scale_y_7, coord_cartesian_7, mean_round3) +
+#  labs(x = "", y = "Belonging at College")
+
+# General function version:
+# Need to specify more stuff but it's more general so you can use it with more grouping variables
+plot_bar_x_y_group <- function(data = data, x_var = x_var, x_labels = x_labels, x_color = x_color,
+                               y_var = y_var, labs_y = labs_y,
+                               group_var = group_var, group_names = group_names,
+                               scale = scale, coord_cartesian = coord_cartesian, mean_round = mean_round) {
+x_var <- enquo(x_var)
+y_var <- enquo(y_var)
+group_var <- enquo(group_var)
+
+data %>%
+  ggplot(aes(x = !!x_var, y = !!y_var, fill = !!x_var, group = !!x_var)) +
+  geom_bar(position = pd1, stat = "identity") + error_bar + theme1 + theme + guides_no + mean_round +
+  coord_cartesian + scale + # this is where you change the scale
+  facet_grid(, vars(!!group_var), labeller = as_labeller(group_names)) + # ignore warning, this is to make the plot facet the variables in the way that we want it
+  x_labels + x_color + labs_y
+}
+
+# Working example if you add this below the summary(model) of belonging at college
+# plot_bar_x_y_group(data = sum_stats, x_var = treat_ec, x_labels = labels_treat, x_color = color_treat,
+#                    y_var = emmean, labs_y = labs_purpose,
+#                    group_var = disadv_ec, group_names = adv_names,
+#                    scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+
+# Working function with mtcars
+plot_x_y_factor <- function(data = data, x_var = x_var, y_var = y_var, group_var = group_var){
+x_var <- enquo(x_var)
+y_var <- enquo(y_var)
+group_var <- enquo(group_var)
+
+ggplot(data, aes(!!x_var, !!y_var)) + 
+  geom_point() + 
+  facet_wrap(vars(!!group_var))
+}
+
+plot_x_y_factor(data = mtcars, wt, mpg, cyl)
+```
+
+
+```{r custom functions describe sample}
+table.describe <- function(data, vector){
+  data %>% select(!!!vector) %>% describe %>% round(., digits = 2) %>% kable 
+}
+```
+
+```{r}
+t4 <- d.an %>% select(t4belongcomp8:t4integration_CF_ASS_EI_Mentor)
+
+# d.an %>% filter(t4ResponseID != "")
+```
+
+# Effect sizes
+
+## Is there inequality?
+
+We want to focus on the effect sizes between males and females in the control group.
+
+### Inequalities between males and females in control
+
+Effect sizes (Cohen's *d*) between males and females in control:
+
+```{r}
+d.an %>% count(cd_purp, cd_purp_num) %>% select(-n)
+
+vars_cont <- quos(purpose_comp2, happy_comp4, belong_comp6, lifesat, happy_comp4, healthmosoverall_comp5, stressdaily, pss_comp4, overallmentalhealth_comp5_z, Y1_Sp_CumGPA, activism_z_comp2, activism_engaged, activism_hours_use_this, job_applylearning, honors_yes_use_this, perf_highexpect, perf_notsat_comp2, collexp_comp4, qualitiesind_comp2, qualitiesinter_comp4, potsuc_comp2, potential_use_this, success_use_this, mentor_yes)
+
+cohend_ineq <- cohen.d.by(x = d.an %>% select(cd_purp_num, gend_num, !!!vars_cont), group = "gend_num", group2 = "cd_purp_num", alpha = .05) %>% summary
+
+cohend_ineq %<>% 
+  rownames_to_column() %>% 
+  filter(rowname == "gend_numforcd_purp_num0") %>% 
+  select(-rowname) %>% 
+  round(., digits = 2)
+
+cohend_ineq
+```
+
+## Is there a treatment effect?
+
+### Differences between control and purpose for all students
+
+```{r}
+cohend_cd_purp_all <- cohen.d(d.an %>% select(cd_purp_num, !!!vars_cont), group = "cd_purp_num", alpha = .05)
+
+cohend_cd_purp_all <- cohend_cd_purp_all$cohen.d
+
+cohend_cd_purp_all %<>% as.data.frame() %>% rownames_to_column()
+
+cohend_cd_purp_all
+```
+
+### Differences between control and any cd_purpment for males and females
+
+Effect sizes (Cohen's *d*) between control and any cd_purpment for advantaged and disadvantaged students:
+
+```{r}
+d.an %>% count(gend, gend_num) %>% select(-n)
+
+cohend_cd_purp_gend <- cohen.d.by(x = d.an %>% select(cd_purp_num, gend_num, !!!vars_cont), group = "cd_purp_num", group2 = "gend_num", alpha = .05) %>% summary
+
+cohend_cd_purp_gend %<>% 
+  rownames_to_column() %>% 
+  mutate_at(vars(-c(rowname)), funs(round(., 2))) %>% 
+  mutate(gender = ifelse(rowname == "cd_purp_numforgend_num0", "male", "female"))
+  # filter(rowname == "cd_purp_numforgend_num1") %>% 
+  # select(-rowname) %>%
+  # round(., digits = 2)
+
+cohend_cd_purp_gend
+```
+
+# Spring Survey (t4) 
+## Descriptive tables
+```{r}
+var_list <- quos(t4belongcomp8, t4BUcomp2, t4happycomp2, t4stresscomp2, t4lonelycomp, t4transitioncomp3,
+                 t4futureselvescomp5, t4abilitycomp2,
+  t4acanxietycomp3, t4feedbackcomp2, t4percievedsocsuppcomp3,
+  t4friendsnumber_mis, t4friendsnumber_0, t4friendsclose_sum,
+  t4friendsclose_ave, t4friendsdensecomp2, t4dormcomp2, t4sucbehvcomp6,
+  t4indepcomp4, t4interdepcomp4, t4purpose_prosocialcomp3,
+  t4purposeindepcomp7, t4healthcomp5, t4Gstreothrtcomp3,
+  t4Rstreothrtcomp3, t4meaningcomp3)
+```
+
+### Purpose vs Control
+
+```{r}
+d.an %>% select(!!!var_list) %>% describeBy(d.an$cd_purp)
+```
+
+### By Disadvantaged Status
+```{r}
+d.an %>% select(!!!var_list) %>% describeBy(d.an$disadv)
+```
+
+### By Treatment and Disadvantaged Status
+```{r}
+d.an %>% select(!!!var_list) %>% describeBy(d.an %>% select(treat, disadv))
+```
+
+### By Each Condition and Disadvantaged Status
+```{r}
+d.an %>% select(!!!var_list) %>% describeBy(d.an %>% select(cond, disadv))
+```
+
+## Analyses
+### Belonging at College (t4)
+#### Collapsed Treatments
+
+Plot without covariates:
+```{r}
+model <- lm(t4belongcomp8 ~ treat * disadv, data = d.an)
+
+sum_stats <- emmeans(model, ~ treat | disadv) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(treat, disadv)), funs(round(., 2))) %>%  kable()
+
+sum_stats %>%
+  ggplot(aes(x = treat, y = emmean, fill = treat, group = treat)) +
+  geom_bar(position = pd1, stat = "identity") +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = .2, position = pd2) +
+  theme1 + theme + guides_no + labels_treat +
+  geom_text(aes(label = format(emmean, digits = 3), y = 1)) +
+  coord_cartesian(ylim = c(1, 7)) + # this is where you change the scale
+    labs(x = "", y = "Belonging at College") +
+  facet_grid(~ disadv, labeller = as_labeller(adv_names))
+
+summary(model)
+```
+
+#### Any Condition
+
+Plot without covariates:
+```{r}
+model <- lm(t4belongcomp8 ~ cond * disadv, data = d.an)
+
+sum_stats <- emmeans(model, ~ cond | disadv) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cond, disadv)), funs(round(., 2))) %>%  kable()
+
+sum_stats %>%
+  ggplot(aes(x = cond, y = emmean, fill = cond, group = cond)) +
+  geom_bar(position = pd1, stat = "identity") +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = .2, position = pd2) +
+  theme1 + theme.cond + guides_no + labels_cond +
+  geom_text(aes(label = format(emmean, digits = 3), y = 1)) +
+  coord_cartesian(ylim = c(1, 7)) + # this is where you change the scale
+    labs(x = "", y = "Belonging") +
+  facet_grid(~ disadv, labeller = as_labeller(adv_names))
+
+summary(model)
+```

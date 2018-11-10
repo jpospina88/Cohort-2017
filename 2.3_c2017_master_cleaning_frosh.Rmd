@@ -1,0 +1,619 @@
+---
+title: "Clean Freshman Spring Survey Master Dataset"
+author: "Juan Ospina"
+date: "11/2/2018"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+    number_sections: TRUE
+---
+
+```{r clean system, message=TRUE, warning=TRUE, include=FALSE}
+rm(list = ls()) # clean environment
+```
+
+```{r global options, echo=FALSE}
+knitr::opts_chunk$set(
+  # fig.path = 'figs/', fig.show = 'asis', dpi = 300, 
+  # include = FALSE, 
+  echo = FALSE, # run the code, show me only the graphs
+  warning = FALSE, message = FALSE, cache = FALSE)
+```
+
+```{r packages}
+library(magrittr)
+library(Hmisc)
+library(RColorBrewer)
+library(reshape2)
+# library(MASS) # negative binomial models
+library(corrplot)
+library(tidyverse)
+library(emmeans) # to get adjusted means and to plot the summary statistics of models
+library(kableExtra)
+library(psych)
+```
+
+```{r}
+d0 <- read_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs.rds")
+```
+
+```{r load custom functions}
+source("../../../premat_intervention_jo/Research Assistants/scripts/custom_functions.R")
+```
+
+# General Notes
+
+## Nomenclature of correlation tables
+
+*   *p* < .001 = ***
+*   *p* < .01 = **
+*   *p* < .05 = *
+*   *p* < 0.1 = † (marginal)
+*   *p* < 0.15 = . (trending)
+
+# Measures
+
+## Independent opportunities
+
+Review variables with keyword "t4ind":
+
+```{r}
+check_vars_by_keywords(d0, c("t4ind"))
+```
+
+Items and scales:
+
+*     *t4indep1*:
+
+```{r}
+attr(d0$t4indep1, "label")
+attr(d0$t4indep1, "labels")
+```
+
+*     *t4indep2*:
+
+```{r}
+attr(d0$t4indep2, "label")
+attr(d0$t4indep2, "labels")
+```
+
+*     *t4indep3*:
+
+```{r}
+attr(d0$t4indep3, "label")
+attr(d0$t4indep3, "labels")
+```
+
+*     *t4indep4*:
+
+```{r}
+attr(d0$t4indep4, "label")
+attr(d0$t4indep4, "labels")
+```
+
+*     *t4indepcomp4*:
+
+```{r}
+attr(d0$t4indepcomp4, "label")
+```
+
+**Correlations**:
+
+```{r}
+vars_indep <- quos(t4indep1, t4indep2, t4indep3, t4indep4, t4indepcomp4)
+corr_table_p(d0, vars_indep)
+```
+
+**Scale Reliability**:
+
+```{r}
+vars_indep <- quos(t4indep1, t4indep2, t4indep3, t4indep4)
+alphatize_2(d0, vars_indep)
+```
+
+**Correlation Plot**:
+
+```{r}
+corr_plot(d0, vars_indep)
+```
+
+
+**Factor Analysis**:
+
+```{r}
+factor_analysis(d0, vars_indep, 1)
+```
+
+
+## Interdependent opportunities
+
+Review variables with keyword "t4interdep":
+
+```{r}
+check_vars_by_keywords(d0, c("t4interdep"))
+```
+
+Items and scales:
+
+*     *t4interdep1*:
+
+```{r}
+attr(d0$t4interdep1, "label")
+attr(d0$t4interdep1, "labels")
+```
+
+*     *t4interdep2*:
+
+```{r}
+attr(d0$t4interdep2, "label")
+attr(d0$t4interdep2, "labels")
+```
+
+*     *t4interdep3*:
+
+```{r}
+attr(d0$t4interdep3, "label")
+attr(d0$t4interdep3, "labels")
+```
+
+*     *t4interdep4*:
+
+```{r}
+attr(d0$t4interdep4, "label")
+attr(d0$t4interdep4, "labels")
+```
+
+*     *t4interdepcomp4*:
+
+```{r}
+attr(d0$t4interdepcomp4, "label")
+```
+
+**Correlations**:
+
+```{r}
+vars_interdep <- 
+  quos(
+    t4interdep1, t4interdep2, t4interdep3, t4interdep4, t4interdepcomp4
+)
+corr_table_p(d0, vars_interdep)
+```
+
+**Scale Reliability**:
+
+```{r}
+vars_interdep <- 
+  quos(
+    t4interdep1, t4interdep2, t4interdep3, t4interdep4
+)
+alphatize_2(d0, vars_interdep)
+```
+
+**Correlation Plot**:
+
+```{r}
+corr_plot(d0, vars_indep)
+```
+
+
+**Factor Analysis**:
+
+```{r}
+factor_analysis(d0, vars_indep, 1)
+```
+
+## Independent purpose for going to college
+
+Review variables with keyword "t4purpose":
+
+```{r}
+vars_interdep <- 
+  quos(
+    t4interdep1, t4interdep2, t4interdep3, t4interdep4
+)
+check_vars_by_keywords(d0, c("t4purpose"))
+```
+
+Items and scales:
+
+*     *t4purpose_earnmoney*:
+
+```{r}
+attr(d0$t4purpose_earnmoney, "label")
+attr(d0$t4purpose_earnmoney, "labels")
+```
+
+*     *t4purpose_proofcase*:
+
+```{r}
+attr(d0$t4purpose_proofcase, "label")
+attr(d0$t4purpose_proofcase, "labels")
+```
+
+*     *t4purpose_positiveimpact*:
+
+```{r}
+attr(d0$t4purpose_positiveimpact, "label")
+attr(d0$t4purpose_positiveimpact, "labels")
+```
+
+*     *t4purpose_edcitizen*:
+
+```{r}
+attr(d0$t4purpose_edcitizen, "label")
+attr(d0$t4purpose_edcitizen, "labels")
+```
+
+*     *t4purpose_expandknowledge*:
+
+```{r}
+attr(d0$t4purpose_expandknowledge, "label")
+attr(d0$t4purpose_expandknowledge, "labels")
+```
+
+*     *t4purpose_indepthinker*:
+
+```{r}
+attr(d0$t4purpose_indepthinker, "label")
+attr(d0$t4purpose_indepthinker, "labels")
+```
+
+*     *t4purpose_learnabtinterests*:
+
+```{r}
+attr(d0$t4purpose_learnabtinterests, "label")
+attr(d0$t4purpose_learnabtinterests, "labels")
+```
+
+*     *t4purposeindepcomp7*:
+
+```{r}
+attr(d0$t4purposeindepcomp7, "label")
+```
+
+**Correlations**:
+
+```{r}
+vars_indep <- 
+  quos(
+    t4purposeindepcomp7, t4purpose_earnmoney, t4purpose_proofcase, t4purpose_positiveimpact, 
+    t4purpose_edcitizen, t4purpose_expandknowledge, t4purpose_indepthinker, t4purpose_learnabtinterests
+)
+
+corr_table_p(d0, vars_indep)
+
+vars_indep <- 
+  quos(
+    t4purpose_earnmoney, t4purpose_proofcase, t4purpose_positiveimpact, 
+    t4purpose_edcitizen, t4purpose_expandknowledge, t4purpose_indepthinker, t4purpose_learnabtinterests
+)
+```
+
+**Scale Reliability**:
+
+```{r}
+alphatize_2(d0, vars_indep)
+```
+
+**Factor Analysis**:
+
+```{r}
+factor_analysis(d0, vars_indep, 1)
+```
+
+**Scale Reliability**: Dropping *t4purpose_earnmoney* and *t4purpose_proofcase*.
+
+```{r}
+vars_indep <- 
+  quos(
+    t4purpose_positiveimpact, t4purpose_edcitizen, t4purpose_expandknowledge, 
+    t4purpose_indepthinker, t4purpose_learnabtinterests
+)
+
+alphatize_2(d0, vars_indep)
+```
+
+**Factor Analysis**: Dropping *t4purpose_earnmoney* and *t4purpose_proofcase*.
+
+```{r}
+factor_analysis(d0, vars_indep, 1)
+```
+
+
+```{r}
+d0 <- cv_compute(d0, cv_name = t4purposeindepcomp5, cv_vector = vars_indep)
+```
+
+
+
+## Interdependent purpose
+
+*     *t4purpose_familyproud*:
+
+```{r}
+attr(d0$t4purpose_familyproud, "label")
+attr(d0$t4purpose_familyproud, "labels")
+```
+
+*     *t4purpose_giveback*:
+
+```{r}
+attr(d0$t4purpose_giveback, "label")
+attr(d0$t4purpose_giveback, "labels")
+```
+
+*     *t4purpose_helpfamily*:
+
+```{r}
+attr(d0$t4purpose_helpfamily, "label")
+attr(d0$t4purpose_helpfamily, "labels")
+```
+
+*     *t4purpose_prosocialcomp3*:
+
+```{r}
+attr(d0$t4purpose_prosocialcomp3, "label")
+```
+
+**Correlations**:
+
+```{r}
+variables <- 
+  quos(
+    t4purpose_prosocialcomp3, t4purpose_familyproud, t4purpose_giveback, t4purpose_helpfamily
+)
+
+corr_table_p(d0, variables)
+
+variables <- 
+  quos(
+    t4purpose_familyproud, t4purpose_giveback, t4purpose_helpfamily
+)
+```
+
+**Scale Reliability**:
+
+```{r}
+alphatize_2(d0, variables)
+```
+
+**Factor Analysis**:
+
+```{r}
+factor_analysis(d0, variables, 1)
+```
+
+Adding the following variables:
+
+*     *t4purpose_rolemodel*:
+
+```{r}
+attr(d0$t4purpose_rolemodel, "label")
+attr(d0$t4purpose_rolemodel, "labels")
+```
+
+*     *t4purpose_positiveimpact*:
+
+```{r}
+attr(d0$t4purpose_positiveimpact, "label")
+attr(d0$t4purpose_positiveimpact, "labels")
+```
+
+*     *t4purpose_edcitizen*:
+
+```{r}
+attr(d0$t4purpose_edcitizen, "label")
+attr(d0$t4purpose_edcitizen, "labels")
+```
+
+**Correlations**:
+
+```{r}
+variables <- 
+  quos(
+    t4purpose_prosocialcomp3, t4purpose_familyproud, t4purpose_giveback, t4purpose_helpfamily, 
+    t4purpose_rolemodel, t4purpose_positiveimpact, t4purpose_edcitizen
+)
+
+corr_table_p(d0, variables)
+
+variables <- 
+  quos(
+    t4purpose_familyproud, t4purpose_giveback, t4purpose_helpfamily, 
+    t4purpose_rolemodel, t4purpose_positiveimpact, t4purpose_edcitizen
+)
+```
+
+**Scale Reliability**:
+
+```{r}
+alphatize_2(d0, variables)
+```
+
+**Factor Analysis**:
+
+```{r}
+factor_analysis(d0, variables, 1)
+```
+
+```{r}
+d0 <- cv_compute(d0, cv_name = t4purpose_prosocialcomp6, cv_vector = variables)
+```
+
+## Friendships
+
+Race of participants:
+
+```{r}
+d0 %>% 
+  count(race)
+```
+
+Race labels of their friends:
+
+```{r}
+# d0 %>% select(ends_with("_race"))
+
+attr(d0$t4friends_1_race, "labels")
+```
+
+### Friendship Diversity Network
+```{r}
+# % of black students should be a multiple of 7 or bigger than 14%
+# subset data to counts of friends (7 friends, 6 friends)
+
+d_f <- d0 %>% 
+  gather(t4friends_1_race:t4friends_7_race, key = friend, value = friend_race) %>% 
+  select(id, race, friend, friend_race) %>%
+  mutate(friend = ifelse(friend == "t4friends_1_race", 1, # relabel friend levels
+                    ifelse(friend == "t4friends_2_race", 2,
+                           ifelse(friend == "t4friends_3_race", 3,
+                                  ifelse(friend == "t4friends_4_race", 4,
+                                         ifelse(friend == "t4friends_5_race", 5,
+                                                ifelse(friend == "t4friends_6_race", 6,
+                                                       ifelse(friend == "t4friends_7_race", 7, friend
+  )))))))) %>% 
+  arrange(id) %>% 
+  mutate(
+    friend_asian = ifelse(friend_race == 1, 1, 0),
+    friend_black = ifelse(friend_race == 2, 1, 0),
+    friend_hispanic = ifelse(friend_race == 3, 1, 0),
+    friend_native = ifelse(friend_race == 4, 1, 0),
+    friend_white = ifelse(friend_race == 5, 1, 0),
+    friend_international = ifelse(friend_race == 6, 1, 0),
+    friend_multirace = ifelse(friend_race == 7, 1, 0),
+    friend_other = ifelse(friend_race == 8, 1, 0)
+  )
+  
+
+
+```
+
+```{r}
+attr(d0$t4friends_1_race, "labels")
+
+d_f %>% 
+  filter(!is.na(friend_race)) %>% 
+  count(friend_race)
+  
+d_f %>% 
+  filter(!is.na(friend_race)) %>% 
+  count(race)
+
+d_f %<>%
+  mutate(friend_race_f = 
+           ifelse(
+             friend_race == 1, "asian",
+             ifelse(
+               friend_race == 2, "black",
+               ifelse(
+                 friend_race == 3, "latino",
+                 ifelse(
+                   friend_race == 4, "native.pi",
+                   ifelse(
+                     friend_race == 5, "white",
+                     ifelse(
+                       friend_race == 6, "international",
+                       ifelse(
+                         friend_race == 7, "multiracial", "other"
+                       )
+                     )
+                   )
+                 )
+               )
+             )
+           )
+  )
+
+d_f %>%
+  count(friend_race_f, friend_race)
+
+d_f %<>% 
+  mutate(
+    friend_race_same = ifelse(race == friend_race_f, 1, 0),
+    friend_race_cross = ifelse(race != friend_race_f, 1, 0)
+    )
+
+# d_f %>% 
+#   count(race, friend_race_f, friend_race_same)
+
+
+d_f_race <-
+  d_f %>% 
+  filter(!is.na(friend_race)) %>% # For the count
+  group_by(id) %>% 
+  summarise(friend_total = n(),
+            friend_asian_count =  sum(friend_asian),
+            friend_black_count =  sum(friend_black),
+            friend_hispanic_count =  sum(friend_hispanic),
+            friend_native_count =  sum(friend_native),
+            friend_white_count =  sum(friend_white),
+            friend_international_count =  sum(friend_international),
+            friend_multirace_count =  sum(friend_multirace),
+            friend_other_count =  sum(friend_other),
+            friend_race_same_count = sum(friend_race_same),
+            friend_race_cross_count = sum(friend_race_cross)
+            ) %>% 
+  ungroup() %>% 
+  mutate(
+    friend_asian_pct = friend_asian_count/friend_total*100,
+    friend_black_pct = friend_black_count/friend_total*100,
+    friend_hispanic_pct = friend_hispanic_count/friend_total*100,
+    friend_native_pct = friend_native_count/friend_total*100,
+    friend_white_pct = friend_white_count/friend_total*100,
+    friend_international_pct = friend_international_count/friend_total*100,
+    friend_multirace_pct = friend_multirace_count/friend_total*100,
+    friend_other_pct = friend_other_count/friend_total*100,
+    friend_race_same_pct = friend_race_same_count/friend_total*100,
+    friend_race_cross_pct = friend_race_cross_count/friend_total*100)
+
+d_f_race %>% 
+  rowwise() %>% 
+  mutate(total_pct = sum(friend_asian_pct, friend_black_pct, friend_hispanic_pct, friend_native_pct, friend_white_pct, friend_international_pct, friend_multirace_pct, friend_other_pct)) %>%
+  ungroup() %>% 
+  count(total_pct)
+
+# add t4 to the dataset
+colnames(d_f_race) <- paste("t4", colnames(d_f_race), sep = "")
+
+d_f_race %<>% 
+  rename(
+    id = t4id
+  )
+```
+
+```{r}
+d0 <- d_f_race %>% 
+  right_join(d0, by = "id")
+
+
+d0 %>% count(t4friend_total)
+
+d0 %>% count(t4friend_asian_count)
+d0 %>% count(t4friend_black_count)
+d0 %>% count(t4friend_asian_pct)
+d0 %>% count(t4friend_black_pct)
+d0 %>% count(t4friend_hispanic_pct)
+d0 %>% count(t4friend_native_pct)
+d0 %>% count(t4friend_white_pct)
+d0 %>% count(t4friend_international_pct)
+d0 %>% count(t4friend_multirace_pct)
+d0 %>% count(t4friend_other_pct)
+d0 %>% count(t4friend_race_same_pct)
+d0 %>% count(t4friend_race_cross_pct)
+
+# d0 %>% select(race, starts_with("friend"))
+
+d_f_race %>% 
+  select(-id) %>% 
+  names %>% 
+  noquote
+```
+
+# Export dataset
+```{r}
+d0 %>% write_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs_Frosh.rds")
+d0 %>% write_csv("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs_Frosh.csv")
+```
+

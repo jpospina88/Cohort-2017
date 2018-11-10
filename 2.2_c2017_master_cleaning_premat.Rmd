@@ -1,0 +1,193 @@
+---
+title: "Clean Pre-Matriculation Intervention Survey in Master Dataset"
+author: "Juan Ospina"
+date: "11/2/2018"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+    number_sections: TRUE
+---
+
+```{r clean system, message=TRUE, warning=TRUE, include=FALSE}
+rm(list = ls()) # clean environment
+```
+
+```{r global options, echo=FALSE}
+knitr::opts_chunk$set(
+  # fig.path = 'figs/', fig.show = 'asis', dpi = 300, 
+  # include = FALSE, 
+  echo = FALSE, # run the code, show me only the graphs
+  warning = FALSE, message = FALSE, cache = FALSE)
+```
+
+```{r packages}
+library(magrittr)
+library(Hmisc)
+library(RColorBrewer)
+library(reshape2)
+# library(MASS) # negative binomial models
+library(tidyverse)
+library(emmeans) # to get adjusted means and to plot the summary statistics of models
+library(kableExtra)
+library(psych)
+```
+
+```{r}
+d0 <- read_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs.rds")
+```
+
+```{r load custom functions}
+source("../../../premat_intervention_jo/Research Assistants/scripts/custom_functions.R")
+```
+
+# Pre-measures before receiving pre-matriculation intervention
+
+## Independent reasons
+
+Review variables with keyword "reason":
+
+```{r}
+check_vars_by_keywords(d0, c("reason"))
+```
+
+Items and scales:
+
+*     *t1preReasons_independent*:
+
+```{r}
+attr(d0$t1preReasons_independent, "label")
+attr(d0$t1preReasons_independent, "labels")
+```
+
+*     *t1preReasons_myinterest*:
+
+```{r}
+attr(d0$t1preReasons_myinterest, "label")
+attr(d0$t1preReasons_myinterest, "labels")
+```
+
+*     *t1preReasonsIndepcomp2*:
+
+```{r}
+attr(d0$t1preReasonsIndepcomp2, "label")
+```
+
+
+**Correlations**:
+
+```{r}
+corr_table_p(d0, quos(t1preReasonsIndepcomp2, t1preReasons_independent,  t1preReasons_myinterest))
+```
+
+## Interdependent reasons
+
+Items and scales:
+
+*     *t1preReasons_familyproud*:
+
+```{r}
+attr(d0$t1preReasons_familyproud, "label")
+attr(d0$t1preReasons_familyproud, "labels")
+```
+
+*     *t1preReasons_community*:
+
+```{r}
+attr(d0$t1preReasons_community, "label")
+attr(d0$t1preReasons_community, "labels")
+```
+
+*     *t1preReasonsInterdepcomp2*:
+
+```{r}
+attr(d0$t1preReasonsInterdepcomp2, "label")
+```
+
+
+**Correlations**:
+
+```{r}
+corr_table_p(d0, quos(t1preReasonsInterdepcomp2, t1preReasons_familyproud, t1preReasons_community))
+```
+
+# Immediate DVs
+
+## Independent qualities
+
+Review variables with keyword "opport":
+
+```{r}
+check_vars_by_keywords(d0, c("qualities"))
+
+check_vars_by_keywords(d0, c("reas"))
+```
+
+Items and scales:
+
+*     *qualities_indownpath*:
+
+```{r}
+attr(d0$qualities_indownpath, "label")
+attr(d0$qualities_indownpath, "labels")
+```
+
+*     *t1opportunty_becomeindepthinker4*:
+
+```{r}
+attr(d0$t1opportunty_becomeindepthinker4, "label")
+attr(d0$t1opportunty_becomeindepthinker4, "labels")
+```
+
+*     *t1opportunty_independent_comp2*:
+
+```{r}
+attr(d0$t1opportunty_independent_comp2, "label")
+```
+
+**Correlations**:
+
+```{r}
+corr_table_p(d0, quos(t1opportunty_independent_comp2, t1opportunty_exploreinterests3,  t1opportunty_becomeindepthinker4))
+```
+
+## Interdependent opportunities
+
+Items and scales:
+
+*     *t1opportunty_joincommunities1R*:
+
+```{r}
+attr(d0$t1opportunty_joincommunities1R, "label")
+attr(d0$t1opportunty_joincommunities1R, "labels")
+```
+
+*     *t1opportunty_giveback2R*:
+
+```{r}
+attr(d0$t1opportunty_giveback2R, "label")
+attr(d0$t1opportunty_giveback2R, "labels")
+```
+
+*     *t1opportunty_interdependent_comp2*:
+
+```{r}
+attr(d0$t1opportunty_interdependent_comp2, "label")
+```
+
+**Correlations**:
+
+```{r}
+corr_table_p(d0, quos(t1opportunty_interdependent_comp2, t1opportunty_joincommunities1R,  t1opportunty_giveback2R))
+```
+
+## Friends attend university next year
+
+*     *t1friendsgoingtoSU*:
+
+```{r}
+# check_vars_by_keywords(d0, c("friend"))
+attr(d0$t1friendsgoingtoSU, "label")
+attr(d0$t1friendsgoingtoSU, "labels")
+```
+

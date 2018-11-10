@@ -1,0 +1,1336 @@
+---
+title: "Clean C2017 Master Dataset"
+author: "Juan Ospina"
+date: "7/4/2018"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+    number_sections: TRUE
+---
+
+```{r clean system, message=TRUE, warning=TRUE, include=FALSE}
+rm(list = ls()) # clean environment
+```
+
+```{r global options, echo=FALSE}
+knitr::opts_chunk$set(
+  # fig.path = 'figs/', fig.show = 'asis', dpi = 300, 
+  # include = FALSE, 
+  echo = FALSE, # run the code, show me only the graphs
+  warning = FALSE, message = FALSE, cache = FALSE)
+```
+
+```{r packages}
+# install.packages(c("RColorBrewer", "reshape2", "tidyverse"))
+library(haven) # package to import SPSS files in R. Useful to import SPSS files and export them as csv
+library(magrittr)
+library(Hmisc)
+# library(RColorBrewer)
+library(reshape2)
+library(tidyverse)
+library(kableExtra)
+library(psych)
+library(corrplot)
+```
+
+```{r}
+d1 <- read_spss("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_(140930).sav")
+d2 <- read_spss("../Newest Data/FIntv_2017_forRebecca.sav")
+d3 <- read_spss("../Newest Data/FIntv_2017_PrimaryOutcomes.sav") # Definitely not. Has 800 more participants, probably duplicates
+
+# dsy <- read_spss("../Newest Data/FIntv_2017_SYFUS_July4_2018.sav") # dsy = data senior year
+dsy.c <- read_rds("../Newest Data/FIntv_2017_SYFUS_nodups.rds")
+```
+
+```{r custom functions}
+alphatize <- function(data, vector){
+  temp <- 
+    data %>% 
+    select(!!!vector) %>% # note that variables in ... must be pre-quoted using quos() function
+    na.omit() %>% 
+    psych::alpha() 
+  
+  temp$total$raw_alpha %>% broman::myround(2)
+  # Example: 
+  # var_list <- quos(disp, wt, cyl)
+  # new_alpha <- alphatize(mtcars, var_list)
+}
+
+alphatize_full <- function(data, vector){
+    data %>% 
+    select(!!!vector) %>% # note that variables in ... must be pre-quoted using quos() function
+    na.omit() %>% 
+    psych::alpha() 
+}
+
+cv_compute <- function(data, cv_name, cv_vector){
+  cv_name <- enquo(cv_name)
+  data %>% 
+      rowwise() %>% 
+      mutate(!!quo_name(cv_name) := mean(c(!!!cv_vector), na.rm = TRUE)) %>% 
+      ungroup()
+}
+
+factor_analysis <- function(data, vector){
+
+  fact <- data %>% select(!!!vector)
+  
+
+ 
+
+  corr_table <- round(cor(fact, use = "pairwise.complete.obs"), digits = 3) # you need to determine how NAs should be treated. SPSS uses deleting NAs pairwise as a default, so R should do the same in order to compare the results
+
+ ?cor
+
+  corrplot(corr_table, method = "circle") # plot matrix
+
+  #scree_plot <- fa.parallel(corr_table, fm = "pa", fa = "fa", main = "Scree Plot"); scree_plot
+
+  scree_plot <- scree(corr_table, factors = TRUE, pc = FALSE, main = "Scree plot", hline = NULL, add = FALSE); scree_plot # pc: principal components, pc is used in Confirmatory Factor Analysis (CFA), instead of Exploratory Factor Analysis (EFA)
+
+  # if the Eigen value is above the cutoff in the scree_plot, then you have a factor!
+
+ 
+
+  # Begin Factor Analysis
+
+  # dim(fact); str(fact)
+
+ 
+
+  # when reviewing the output of factanal, the Factor of each item should be > .6 to consider these items as part of the composite that we want to compute.
+
+  factanal(na.omit(fact),
+
+    factors = 1, # how many factors to calculate
+
+   rotation = "varimax") # "varimax" uncorrelate the items by computing an orthogonal vector with all the items
+
+}
+
+table.describe <- function(data, vector){
+  data %>% select(!!!vector) %>% describe %>% round(., digits = 2) %>% kable(format = "html") %>% 
+    kable_styling(bootstrap_options = c("hover", "responsive"), font_size = 12, full_width = F)
+}
+
+corr_table <- function(df, vars){
+  df %>% # then
+  select(!!!vars) %>%
+  corstarsl.all() %>% 
+  rownames_to_column(., var = "var") %>% 
+  slice(-1) %>% 
+  kable(format = "html") %>% 
+  kable_styling(bootstrap_options = c("hover", "responsive"), font_size = 12, full_width = F)
+}
+
+corstarsl.all <- function(x){ 
+require(Hmisc) 
+x <- as.matrix(x) 
+R <- rcorr(x)$r 
+p <- rcorr(x)$P
+n <- rcorr(x)$n
+
+## define notions for significance levels; spacing is important.
+mystars <- ifelse(p < .001, " ***", 
+                  ifelse(p < .01, " **", 
+                         ifelse(p < .05, " *", # significant
+                                ifelse(p < 0.1, " †", # marginal
+                                       ifelse(p < 0.15, " .", " "))))) # trending
+
+## trunctuate the matrix that holds the correlations to two decimal
+R <- format(round(cbind(rep(-1.11, ncol(x)), R), 3))[,-1] 
+
+## add number of observations in parenthesis
+n.p <- n %>% as.data.frame() %>% 
+  mutate_all(funs(paste0("(", . ,")"))) %>% 
+  as.matrix()
+
+## build a new matrix that includes the correlations with their apropriate stars 
+Rnew <- matrix(paste(R, mystars, n.p, sep=" "), ncol=ncol(x)) 
+diag(Rnew) <- paste(diag(R), " ", sep="") 
+rownames(Rnew) <- colnames(x) 
+colnames(Rnew) <- paste(colnames(x), "", sep="") 
+
+## remove upper triangle
+Rnew <- as.matrix(Rnew)
+Rnew[upper.tri(Rnew, diag = TRUE)] <- ""
+Rnew <- as.data.frame(Rnew) 
+
+## remove last column and return the matrix (which is now a data frame)
+Rnew <- cbind(Rnew[1:length(Rnew)-1])
+return(Rnew) 
+}
+```
+
+```{r raincloud plots}
+n_obs <- function(x) sum(!is.na(x))
+mn <- function(x) round(mean(x, na.rm = TRUE), 2)
+mdn <- function(x) median(x, na.rm = TRUE)
+std <- function(x) round(sd(x, na.rm = TRUE), 2)
+lb <- function(x) round(mean(x, na.rm = TRUE) - sd(x, na.rm = TRUE), 2)
+ub <- function(x) round(mean(x, na.rm = TRUE) + sd(x, na.rm = TRUE), 2)
+
+sum_stats_round_new <- function(data, factors, variables) {
+  ftr <- enquo(factors)
+  var <- enquo(variables)
+  
+  data %>% 
+    group_by(!!!ftr) %>% 
+    summarise(
+      n = n_obs(!!!var),
+      mean = mn(!!!var),
+      median = mdn(!!!var),
+      sd = std(!!!var),
+      lower = lb(!!!var),
+      upper = ub(!!!var))
+}
+
+geom_flat_violin <-
+  function(mapping = NULL,
+           data = NULL,
+           stat = "ydensity",
+           position = "dodge",
+           trim = TRUE,
+           scale = "area",
+           show.legend = NA,
+           inherit.aes = TRUE,
+           ...) {
+    ggplot2::layer(
+      data = data,
+      mapping = mapping,
+      stat = stat,
+      geom = GeomFlatViolin,
+      position = position,
+      show.legend = show.legend,
+      inherit.aes = inherit.aes,
+      params = list(trim = trim,
+                    scale = scale,
+                    ...)
+    )
+  }
+
+GeomFlatViolin <-
+  ggproto(
+    "GeomFlatViolin",
+    Geom,
+    setup_data = function(data, params) {
+      data$width <- data$width %||%
+        params$width %||% (resolution(data$x, FALSE) * 0.9)
+      
+      # ymin, ymax, xmin, and xmax define the bounding rectangle for each group
+      data %>%
+        dplyr::group_by(.data = ., group) %>%
+        dplyr::mutate(
+          .data = .,
+          ymin = min(y),
+          ymax = max(y),
+          xmin = x,
+          xmax = x + width / 2
+        )
+    },
+    
+    draw_group = function(data, panel_scales, coord)
+    {
+      # Find the points for the line to go all the way around
+      data <- base::transform(data,
+                              xminv = x,
+                              xmaxv = x + violinwidth * (xmax - x))
+      
+      # Make sure it's sorted properly to draw the outline
+      newdata <-
+        base::rbind(
+          dplyr::arrange(.data = base::transform(data, x = xminv), y),
+          dplyr::arrange(.data = base::transform(data, x = xmaxv), -y)
+        )
+      
+      # Close the polygon: set first and last point the same
+      # Needed for coord_polar and such
+      newdata <- rbind(newdata, newdata[1,])
+      
+      ggplot2:::ggname("geom_flat_violin",
+                       GeomPolygon$draw_panel(newdata, panel_scales, coord))
+    },
+    
+    draw_key = draw_key_polygon,
+    
+    default_aes = ggplot2::aes(
+      weight = 1,
+      colour = "grey20",
+      fill = "white",
+      size = 0.5,
+      alpha = NA,
+      linetype = "solid"
+    ),
+    
+    required_aes = c("x", "y")
+  )
+```
+
+# Review datasets
+
+```{r check id d1}
+d1 %>% select(contains("emp"))
+d1 %>% select(contains("sun"))
+d1 %>% select(contains("id"))
+
+# Emplid is more complete than Emplidw0
+d1 %>% filter(!is.na(Emplid)) %>% select(starts_with("emp"))
+d1 %>% filter(!is.na(Emplidw0)) %>% select(starts_with("emp"))
+
+# SUNetID is also complete
+d1 %>% filter(!is.na(SUNetID)) %>% select(starts_with("sun"))
+```
+
+```{r drop rows after first entry d1}
+d1 %>% 
+  group_by(SUNetID) %>% 
+  arrange(SUNetID) %>% 
+  slice(1) %>% 
+  ungroup()
+
+d1 %>% 
+  group_by(Emplid) %>% 
+  arrange(Emplid) %>% 
+  slice(1) %>% 
+  ungroup()
+
+duplicated(d1$SUNetID) %>% sum
+subset(d1, duplicated(SUNetID) == TRUE, select = 'SUNetID')
+
+duplicated(d1$Emplid) %>% sum
+subset(d1, duplicated(Emplid) == TRUE, select = 'Emplid')
+```
+
+```{r no id for d2}
+d2 %>% select(contains("emp"))
+d2 %>% select(contains("sun"))
+d2 %>% select(contains("id"))
+```
+
+```{r check id d3}
+d3 %>% select(contains("emp"))
+d3 %>% select(contains("sun"))
+d3 %>% select(contains("id"))
+
+# Complete
+d3 %>% filter(!is.na(iEmplid))
+
+# SUNetID is also complete
+d3 %>% filter(!is.na(SUNetID))
+```
+
+```{r drop rows after first entry}
+d3 %>% 
+  group_by(iEmplid) %>% 
+  arrange(iEmplid) %>% 
+  slice(1) %>% 
+  ungroup()
+
+d3 %>% 
+  group_by(SUNetID) %>% 
+  arrange(SUNetID) %>% 
+  slice(1) %>% 
+  ungroup()
+```
+
+```{r remove other datasets}
+rm(d2, d3)
+```
+
+```{r merge clean syfus with master d1}
+d.all <- d1 %>% mutate(sunet = SUNetID) %>% left_join(dsy.c, by = "sunet")
+
+# subset(d.all, duplicated(RecipientEmail) == T, select = 'RecipientEmail')
+
+# d.all %>% filter(!is.na(RecipientEmail))
+# d.all %>% filter(startedSYFUS == 1)
+
+d.all %<>% mutate(startedSYFUS = ifelse(is.na(startedSYFUS), 0, 1))
+
+d.all %>% count(startedSYFUS) # You should get 559 participants who started SYFUS and 1158 who did not started SYFUS
+
+d.all %>% filter(sunet == "dienhart")
+```
+
+
+# Review demographics, conditions, and covariates
+
+## Filter dataset
+```{r}
+d.all.f <- d.all 
+# %>% filter(t1condition != "") # filter only students who have any condition 
+
+d.all.f %>% count(startedSYFUS)
+
+d.all %>% count(t1condition, cd2_control, cd1_belonging, cd3_culture, cd5_purpose, cd4_anytreatment)
+
+d.all.f %>% count(t1condition, cd2_control, cd1_belonging, cd3_culture, cd5_purpose, cd4_anytreatment)
+
+d.all.f %>% count(cd7_pma_affstandard, cd8_pma_affshared, cd9_pma_affcontrol, cd10_pma_anytreatment)
+
+d.all.f %>% count(cd2_control, cd4_anytreatment, cd9_pma_affcontrol, cd10_pma_anytreatment)
+
+# d.all.ff <- d.all.f %>% filter(cd2_control != 0 | cd4_anytreatment != 0)
+
+cond <- d.all.f %>% select(contains("cd"), contains("cond"), contains("treat"))
+rm(cond)
+
+race.cond <- d.all %>% count(t1condition, race_nointl_wPI_USETHIS)
+```
+
+```{r}
+d.all.f %>% count(startedSYFUS)
+
+d.all %>% count(startedSYFUS)
+```
+
+## Add de-identified random IDs
+```{r}
+# check that Emplid are unique (i.e. not duplicated)
+# d.all.f$Emplid %>% unique
+
+id_df <-
+  read_csv("../Newest data/c2017_deidentified_ids.csv")
+
+d.all.f %<>% 
+  bind_cols(id_df)
+  # mutate(
+  #   cohort = 2017,
+  #   num_seq = sample(1000:9999, 1717, replace = FALSE),
+  #   id = paste0(cohort, num_seq))
+
+# d.all.f %>% 
+#   select(Emplid, id, cohort, num_seq)
+```
+
+## Review and clean demographics
+
+### Get attributes from race
+
+```{r}
+d.all.f$race_nointl_wPI_USETHIS %>% attr("labels")
+```
+
+### Clean demographics
+
+```{r}
+demog <- d.all.f %>% select(contains("race"), contains("age"))
+
+demog <- d.all.f %>% select(iGender, classList_Gender, starts_with("atrisk"))
+rm(demog)
+
+d.all.f %<>% mutate(disadv_num = atrisk_nointlwPI_regFG_USETHIS,
+                    disadv = factor(disadv_num, levels = c(0, 1), labels = c("adv", "disadv")),
+                    gend = iGender,
+                    gend_num = ifelse(gend == "M", 0,
+                                  ifelse(gend == "F", 1, NA)),
+                    gend = factor(gend_num, levels = c(0, 1), labels = c("m", "f")),
+                    firstgen_num = firstgen_reg_USETHIS,
+                    firstgen = factor(firstgen_num, levels = c(0, 1), labels = c("cont", "first")),
+                    race = race_nointl_wPI_USETHIS,
+                    race_old = factor(race, levels = c(1, 2, 3, 4, 5, 7), 
+                                  labels = c("asian", "black", "latino", "native", "white", "pislander")),
+                    race = ifelse(race_old == "native" | race_old == "pislander", 4, race_old) %>% 
+                           factor(levels = c(1, 2, 3, 4, 5), 
+                                  labels = c("asian", "black", "latino", "native.pi", "white")))
+
+d.all.f %>% count(disadv, disadv_num)
+
+d.all.f %>% count(iGender, gend, gend_num)
+
+d.all.f %>% count(firstgen_reg_USETHIS, firstgen_num, firstgen)
+
+d.all.f %>% count(race_nointl_wPI_USETHIS, race_old, race, race_asian, race_black, race_latino, race_native, race_white, race_pi)
+```
+
+## Review conditions
+```{r}
+# d.all %>% select(contains("cd"), contains("cond"), contains("treat"))
+
+# All conditions:
+
+# d.all %>% count(cd1_belonging, cd2_control, cd3_culture, cd4_anytreatment, cd5_purpose, cd6_pcontrol, cd7_pma_affstandard, cd8_pma_affshared, cd9_pma_affcontrol, cd10_pma_anytreatment, conditionpma, t1condition, t1condition_Numeric)
+
+# Not useful conditions
+# d.all %>% count(t1PurposeCondition, t1CultureConditon, t1BelongingCondiiton, t1ControlCondition)
+
+# cond <- d.all %>% count(cd1_belonging, cd2_control, cd3_culture, cd4_anytreatment, cd5_purpose, cd6_pcontrol, cd7_pma_affstandard, cd8_pma_affshared, cd9_pma_affcontrol, cd10_pma_anytreatment)
+
+d.all %>% count(cd2_control, cd1_belonging, cd3_culture, cd5_purpose, cd4_anytreatment)
+
+d.all %>% count(cd4_anytreatment, cd10_pma_anytreatment, startedSYFUS)
+
+d.all %>% count(cd4_anytreatment, cd9_pma_affcontrol, startedSYFUS)
+```
+
+## Clean conditions
+```{r}
+d.all.f %<>% mutate(treat_num = cd4_anytreatment,
+                    treat = factor(treat_num, levels = c(0, 1), labels = c("ctl", "treat")),
+                    cond_num = ifelse(cd2_control == 1, 0,
+                                 ifelse(cd1_belonging == 1, 1,
+                                   ifelse(cd3_culture == 1, 2,
+                                     ifelse(cd5_purpose == 1, 3, NA)))),
+                    cond = factor(cond_num, levels = c(0, 1, 2, 3), labels = c("ctl", "bel", "cul", "purp")))
+
+d.all.f %>% count(cd4_anytreatment, treat_num, treat)
+
+d.all.f %>% count(t1condition, cond_num, cond, cd2_control, cd1_belonging, cd3_culture, cd5_purpose)
+```
+
+## Create a condition of only purpose and pcontrol
+### Simple coding
+```{r}
+# Dummy coding, deviation coding, simple coding
+# https://stats.idre.ucla.edu/r/library/r-library-contrast-coding-systems-for-categorical-variables/#SIMPLE
+
+d.all.f %<>% mutate(cd_purp_num = ifelse(t1condition == "purpose", 1,
+                                    ifelse(t1condition == "pcontrol", 0, NA)),
+                    cd_purp = factor(cd_purp_num, levels = c(0, 1), labels = c("ctl", "purp")),
+                    cd_purp_ec = cd_purp,
+                    cd_purp_ec = factor(cd_purp_ec, levels = c("purp", "ctl")),
+                    cd_purp_ec2 = cd_purp,
+                    cd_purp_sc = factor(cd_purp_ec2, levels = c("ctl", "purp")),
+                    cd_purp_ec2 = factor(cd_purp_ec2, levels = c("ctl", "purp")),
+                    gend_ec = gend,
+                    gend_ec = factor(gend_ec, levels = c("f", "m")),
+                    gend_ec2 = gend,
+                    gend_sc = factor(gend_ec2, levels = c("m", "f")),
+                    gend_ec2 = factor(gend_ec2, levels = c("m", "f"))
+                    )
+
+d.all.f %>% count(t1condition, cd2_control, cd5_purpose, cd_purp)
+
+d.all.f %<>% mutate(cd_purp_num2 = ifelse(t1condition == "purpose", 1,
+                                    ifelse(t1condition == "pcontrol", 0,
+                                      ifelse(t1condition == "control" & disadv == "adv", 0, NA))),
+                    cd_purp2 = factor(cd_purp_num2, levels = c(0, 1), labels = c("ctl", "purp")))
+
+
+d.all.f %>% count(t1condition, cd_purp, cd_purp_ec)
+
+contrasts(d.all.f$cd_purp_ec) = contr.sum(2) # deviation (effect) coding
+contrasts(d.all.f$gend_ec) = contr.sum(2) # deviation (effect) coding
+
+contrasts(d.all.f$cd_purp_ec2) = contr.sum(2) # deviation (effect) coding
+contrasts(d.all.f$gend_ec2) = contr.sum(2) # deviation (effect) coding
+
+
+d.all.f %>% select(t1condition, cd_purp, cd_purp_ec, cd_purp_ec2, gend, gend_ec, gend_ec2) %>% str
+
+d.all.f$cd_purp_ec %>% attr("contrasts")
+d.all.f$gend_ec %>% attr("contrasts")
+
+d.all.f$cd_purp_ec2 %>% attr("contrasts")
+d.all.f$gend_ec2 %>% attr("contrasts")
+
+#creating the contrast matrix manually by modifying the dummy coding scheme
+# Two levels
+c <- contr.treatment(2)
+my.coding <- matrix(rep(1/2, 2), ncol = 1)
+my.simple <- c - my.coding
+
+contrasts(d.all.f$gend_sc) <- my.simple
+contrasts(d.all.f$cd_purp_sc) <- my.simple
+
+d.all.f$gend_sc %>% attr("contrasts")
+d.all.f$cd_purp_sc %>% attr("contrasts")
+
+d.all.f %>% count(cd_purp, cd_purp2, race, disadv)
+
+d.all.f %>% count(cd_purp, cd_purp_ec, cd_purp_ec2, cd_purp_sc)
+
+d.all.f %>% count(gend, gend_ec, gend_ec2, gend_sc)
+```
+
+```{r}
+d.all.f %>% count(t1study_Numeric)
+
+d.all.f %>% filter(t1study_Numeric == 2) %>% count(t1condition)
+
+d.all.f %>% filter(t1study_Numeric == 2 & startedSYFUS == 1) %>% count(t1condition)
+```
+
+# Review covariates
+```{r}
+# d.all.f %>% select(contains("rank"), contains("sat"), contains("act"))
+
+d.all.f %<>% mutate(hsrank = HSclassrank_USETHIS,
+                   sattoact = isatmathreading_actconverted)
+
+d.all.f %>% select(HSclassrank_USETHIS, hsrank, isatmathreading_actconverted, sattoact)
+```
+
+
+# Compute new variables
+
+## Belonging and College Experience
+### Belonging at College
+
+```{r}
+d.all.f %<>% mutate(
+  belong_outsider_r_use_this = 8 - belong_outsider_r, # new_name = 8 - old_name
+  belong_understand_r_use_this = 8 - belong_understand_r,
+  belong_mystery_r_use_this = 8 - belong_mystery_r)
+```
+
+#### Recoding items
+
+```{r}
+count(d.all.f, belong_outsider_r, belong_outsider_r_use_this)
+count(d.all.f, belong_understand_r, belong_understand_r_use_this)
+count(d.all.f, belong_mystery_r, belong_mystery_r_use_this)
+```
+
+#### Summarizing items
+```{r}
+vector_belong <- quos(belong_belong, belong_fitin, belong_outsider_r_use_this, 
+                      belong_understand_r_use_this, belong_similar, belong_mystery_r_use_this)
+
+table.describe(d.all.f, vector_belong)
+```
+
+#### Reliability analysis
+
+```{r}
+# temp <- d %>% select(belong_outsider_r, belong_outsider_r_use_this, belong_understand_r, belong_understand_r_use_this)
+
+alpha_belong <- alphatize(d.all.f, vector_belong) # Alpha: 0.79
+
+# both codes below will give you the same output
+# d %>% select(!!!vector_belong) %>% alpha
+alphatize_full(d.all.f, vector_belong)
+
+corr_table(d.all.f, vector_belong)
+
+# both codes below will give you the same output
+# d %>% select(!!!vector_belong_understand) %>% as.matrix() %>% rcorr()
+# corr_full(d, vector_belong_understand)
+```
+
+#### Factor analysis
+```{r}
+factor_analysis(d.all.f, vector_belong) ##Items 4 and 6 don't fit. 
+```
+
+#### Compute and review Belonging at College Composite
+```{r}
+d.all.f %<>%  cv_compute(cv_name = belong_comp6, cv_vector = vector_belong)
+```
+
+```{r}
+hist(d.all.f$belong_comp6) # fairly normally distributed.
+boxplot(d.all.f$belong_comp6)
+```
+
+| Belonging at college (belong_comp6) | ${\alpha}$ = `r alpha_belong`|
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Strongly disagree ... 7 = Strongly agree| 
+| Items | 1.      I feel like I belong at Stanford. |
+|       | 2.      I fit in well at Stanford. | 
+|       | 3.      I feel like an outsider at Stanford. (reversed) | 
+|       | 4.      Other people understand more than I do about what is going on at Stanford. (reversed) | 
+|       | 5.      I am similar to the kind of people who succeed at Stanford. | 
+|       | 6.      It is a mystery to me how Stanford works. (reversed) | 
+
+
+### Apply Learning at Job
+```{r}
+d.all.f$job_applylearning %>% describe()
+```
+
+| Apply Learning at Job (job_applylearning) | |
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Strongly disagree ... 7 = Strongly agree |
+| Item  | 1.      Since I started at Stanford, I have had an internship or job that allowed me to apply what I was learning in the classroom. |
+
+### % Honors
+```{r}
+d.all.f %<>% mutate(honors_yes_use_this = ifelse(honors_yes == 2, 0, honors_yes))
+
+vector_honors_yes <- quos(honors_yes, honors_yes_use_this)
+
+table.describe(d.all.f, vector_honors_yes)
+
+count(d.all.f, honors_yes, honors_yes_use_this)
+```
+
+### Positive Evaluation of College
+#### Summarizing items
+```{r}
+d.all.f %<>% mutate(coll_disillusioned_r_use_this = 8 - coll_disillusioned_r)
+
+vector_coll <- quos(coll_perfschool, coll_disillusioned_r_use_this, coll_caresuccess, coll_prepareme)
+table.describe(d.all.f, vector_coll)
+```
+
+#### Reliability analysis
+```{r}
+alpha_coll <- alphatize(d.all.f, vector_coll) # Alpha: 0.89
+
+alphatize_full(d.all.f, vector_coll)
+
+corr_table(d.all.f, vector_coll)
+```
+
+#### Factor analysis
+```{r}
+factor_analysis(d.all.f, vector_coll)
+```
+
+#### Compute and review Positive Evaluation of College Composite
+```{r}
+d.all.f %<>% cv_compute(cv_name = collexp_comp4, cv_vector = vector_coll)
+```
+
+```{r}
+hist(d.all.f$collexp_comp4)
+boxplot(d.all.f$collexp_comp4)
+```
+
+| Positive Evaluation of College (collexp_comp4) | ${\alpha}$ = `r alpha_coll`|
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Strongly disagree … 7 = Strongly agree |
+| Items | 1. Stanford is the perfect school for people like me. |
+|       | 2. I am disillusioned with Stanford. (reversed) |
+|       | 3. Stanford is passionate about the long-term success of its students. |
+|       | 4. Stanford has prepared me well for life outside of college. |
+
+### Independence Valued at College
+#### Summarizing items
+```{r}
+# d.all.f %>% select(contains("qualities_ind"))
+
+d.all.f %<>% mutate(qualities_indgoals = qualities_qualities_indgoals,
+                  qualities_indownpath = qualities_qualities_indownpath,
+                  qualities_indselfmotivated = qualities_qualities_indselfmotivated)
+
+vector_indep <- quos(qualities_indgoals, qualities_indownpath, qualities_indselfmotivated)
+
+vector_indep2 <- quos(qualities_indgoals, qualities_indselfmotivated)
+
+table.describe(d.all.f, vector_indep)
+```
+
+#### Reliability and correlational analysis
+
+Reliability is low when having the three items. It is better to compute a composite with the two items that are moderately correlated (qualities_indgoals, qualities_indselfmotivated).
+
+```{r}
+alpha_indep <- alphatize(d.all.f, vector_indep)
+
+alphatize_full(d.all.f, vector_indep)
+
+corr_table(d.all.f, vector_indep)
+
+corr_table(d.all.f, vector_indep2)
+```
+
+#### Factor analysis
+
+Factor analysis does not load to one factor when having the three items. 
+
+```{r}
+factor_analysis(d.all.f, vector_indep)
+```
+
+#### Compute and review Independence Valued at College Composite
+```{r}
+d.all.f %<>% cv_compute(cv_name = qualitiesind_comp2, cv_vector = vector_indep2)
+```
+
+```{r}
+hist(d.all.f$qualitiesind_comp2)
+boxplot(d.all.f$qualitiesind_comp2)
+```
+
+| Independence Valued at College (qualitiesind_comp2) | |
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Not valued at all ... 5 = Valued a great deal | 
+| Items | 1.      Achieving individual goals |
+|       | 2.      Being independently motivated | 
+
+### Interdependence Valued at College
+#### Summarizing items
+
+```{r}
+# d.all.f %>% select(contains("qualities_int"))
+d.all.f %<>% mutate(qualities_intersharedvalues = qualities_qualities_intersharedvalues,
+                    qualities_interconnected = qualities_qualities_interconnected,
+                    qualities_intergenrel = qualities_qualities_intergenrel,
+                    qualities_intergiveback = qualities_qualities_intergiveback,
+                    qualities_interothersmotivated = qualities_qualities_interothersmotivated)
+
+vector_inter <- quos(qualities_intersharedvalues, qualities_interconnected, qualities_intergenrel, qualities_intergiveback, qualities_interothersmotivated)
+
+vector_inter2 <- quos(qualities_intersharedvalues, qualities_interconnected, qualities_intergenrel, qualities_intergiveback)
+
+table.describe(d.all.f, vector_inter)
+```
+
+#### Reliability and correlational analysis
+
+qualities_interothersmotivated is not correlated with the other items. Thus, we are not going to include it in the composite.
+
+```{r}
+corr_table(d.all.f, vector_inter)
+```
+
+Reliability and correlations with the other interdependent items:
+
+```{r}
+alpha_inter <- alphatize(d.all.f, vector_inter2)
+
+alphatize_full(d.all.f, vector_inter2)
+
+corr_table(d.all.f, vector_inter2)
+```
+
+#### Factor analysis
+
+Factor analysis does not include the qualities_interothersmotivated item
+
+```{r}
+factor_analysis(d.all.f, vector_inter)
+```
+
+```{r}
+factor_analysis(d.all.f, vector_inter2)
+```
+
+#### Compute and review Interdependence Valued at College Composite
+```{r}
+d.all.f %<>% cv_compute(cv_name = qualitiesinter_comp4, cv_vector = vector_inter2)
+```
+
+```{r}
+hist(d.all.f$qualitiesinter_comp4)
+boxplot(d.all.f$qualitiesinter_comp4)
+```
+
+| Interdependence Valued at College (qualitiesinter_comp4) | ${\alpha}$ = `r alpha_inter`|
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Not valued at all ... 5 = Valued a great deal | 
+| Items | 1.      Joining communities of people on campus with shared values and perspectives |
+|       | 2.      Giving back to your community |
+|       | 3.      Staying connected with your family and community back home |
+|       | 4.      Nurturing genuine relationships |
+
+### Relative Potential and Success to Other Ss
+#### Summarizing items
+```{r}
+d.all.f %<>% mutate(potential_use_this = potential - 1,
+                   success_use_this = success - 1)
+
+vector_potsuc <- quos(potential, potential_use_this, success, success_use_this)
+
+table.describe(d.all.f, vector_potsuc)
+
+vector_potsuc <- quos(potential_use_this, success_use_this)
+```
+#### Correlational analysis
+
+```{r}
+corr_table(d.all.f, vector_potsuc)
+```
+
+#### Compute and review Relative Potential and Success to Other Ss Composite
+```{r}
+d.all.f %<>% cv_compute(cv_name = potsuc_comp2, cv_vector = vector_potsuc)
+```
+
+```{r}
+hist(d.all.f$potsuc_comp2)
+boxplot(d.all.f$potsuc_comp2)
+```
+
+### Has a Mentor
+```{r}
+count(d.all.f, mentor_yes)
+```
+
+## Extracurriculars
+
+```{r}
+# d.all.f %>% count(org_type_org1)
+
+# d.all.f %>% head
+
+orgs <-
+  d.all.f %>%
+  gather(org_type_org1:org_type_org5, key = org, value = type) %>%
+  select(id, org, type) %>%
+  mutate(
+    org = ifelse(org == "org_type_org1", 1,
+                    ifelse(org == "org_type_org2", 2,
+                           ifelse(org == "org_type_org3", 3,
+                                  ifelse(org == "org_type_org4", 4,
+                                         ifelse(org == "org_type_org5", 5, org
+  )))))) %>%
+  arrange(id) %>%
+  filter(!is.na(type))
+
+orgs %>% count(type)
+
+ggplot(orgs, aes(type)) + geom_bar()
+
+# orgs %>%
+#   group_by(id) %>%
+#   summarise(total_p = n())
+
+attr(d.all.f$org_type_org1, "labels")
+```
+
+```{r}
+attr(d.all.f$org_type_org1, "labels")
+
+orgs %<>%
+  mutate(
+    type_fctr = factor(type,
+      levels = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+      labels = c("Academic or\nprofessional", "Athletics or\nrecreation", "Media or\ncommunications", "Community, health,\neducation, conservation\nor outreach", "Cultural\n organizations", "Games", "Leadership\nor politics", "Performance\narts", "Religion or\nphilosophy", "Social\n(including Greek\nlife)", "Other"))
+  )
+
+orgs %<>%
+  mutate(
+    org1 = ifelse(type == 1, 1, 0),
+    org2 = ifelse(type == 2, 1, 0),
+    org3 = ifelse(type == 3, 1, 0),
+    org4 = ifelse(type == 4, 1, 0),
+    org5 = ifelse(type == 5, 1, 0),
+    org6 = ifelse(type == 6, 1, 0),
+    org7 = ifelse(type == 7, 1, 0),
+    org8 = ifelse(type == 8, 1, 0),
+    org9 = ifelse(type == 9, 1, 0),
+    org10 = ifelse(type == 10, 1, 0),
+    org11 = ifelse(type == 11, 1, 0)
+  )
+
+orgs %>% count(type_fctr, type)
+
+ggplot(orgs, aes(type_fctr)) + geom_bar()
+
+# levels(orgs$type_fctr) <- gsub(" ", "\n", levels(orgs$type_fctr))
+# 
+# ggplot(orgs, aes(type_fctr)) + geom_bar()
+```
+
+```{r}
+d.all.f <-
+ orgs %>%
+  group_by(id) %>%
+  summarise(org_total = n(),
+            org1_ever = ifelse(sum(org1) > 0, 1, 0),
+            org2_ever = ifelse(sum(org2) > 0, 1, 0),
+            org3_ever = ifelse(sum(org3) > 0, 1, 0),
+            org4_ever = ifelse(sum(org4) > 0, 1, 0),
+            org5_ever = ifelse(sum(org5) > 0, 1, 0),
+            org6_ever = ifelse(sum(org6) > 0, 1, 0),
+            org7_ever = ifelse(sum(org7) > 0, 1, 0),
+            org8_ever = ifelse(sum(org8) > 0, 1, 0),
+            org9_ever = ifelse(sum(org9) > 0, 1, 0),
+            org10_ever = ifelse(sum(org10) > 0, 1, 0),
+            org11_ever = ifelse(sum(org11) > 0, 1, 0),
+            org12_ever = ifelse(sum(org4, org5) > 0, 1, 0)) %>% # community and cultural organizations
+  ungroup() %>%
+    right_join(d.all.f, by = "id")
+
+
+# make sure that the coding above worked
+d.all.f %>%
+  count(org4_ever, org5_ever, org12_ever)
+
+# check the coding worked
+# org2 <- d.all.f %>% select(id, org_total, starts_with("org_name"))
+```
+TO DO: pro-social extracurriculars?
+
+
+## Well-being
+
+### Eudaimonic Well-being
+#### Summarizing items
+```{r}
+vector_purpose <- quos(purpose_meaning, purpose_contribute)
+
+table.describe(d.all.f, vector_purpose)
+```
+
+#### Correlational analysis
+
+```{r}
+corr_table(d.all.f, vector_purpose)
+```
+
+#### Compute and review Eudaimonic Well-being Composite
+```{r}
+d.all.f %<>% cv_compute(cv_name = purpose_comp2, cv_vector = vector_purpose)
+```
+
+```{r}
+hist(d.all.f$purpose_comp2)
+boxplot(d.all.f$purpose_comp2)
+```
+
+| Eudaimonic wellbeing (purpose_comp2) | |
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Not at all ... 5 = A great deal |
+| Items | 1.      Right now, how much do you feel that your life has a sense of direction or meaning to it? |
+|       | 2.      Right now, how much do you feel that you have something to contribute to society? |
+
+
+### Happiness
+
+```{r}
+d.all.f %<>% 
+  mutate(happy_unhappy_r_use_this = 8 - happy_unhappy_r)
+```
+
+#### Summarizing items
+```{r}
+vector_happy <- quos(happy_person, happy_comppeer, happy_enjoylife, happy_unhappy_r_use_this)
+
+table.describe(d.all.f, vector_happy)
+```
+
+#### Reliability analysis
+
+```{r}
+alpha_happy <- alphatize(d.all.f, vector_happy) # Alpha: 0.88
+
+alphatize_full(d.all.f, vector_happy)
+
+corr_table(d.all.f, vector_happy)
+```
+
+#### Factor analysis
+```{r}
+factor_analysis(d.all.f, vector_happy) ##Items 4 and 6 don't fit. 
+```
+
+#### Compute and review Happiness Composite
+```{r}
+d.all.f %<>% cv_compute(cv_name = happy_comp4, cv_vector = vector_happy)
+```
+
+```{r}
+hist(d.all.f$happy_comp4) # fairly normally distributed.
+boxplot(d.all.f$happy_comp4)
+```
+
+| Happiness (happy_comp4) | ${\alpha}$ = `r alpha_happy`|
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Not a very happy person/Less happy/Not at all ... 7 = A very happy person/More happy/A great deal |
+| Items | 1.      In general, I consider myself: |
+|       | 2.      Compared with most of my peers, I consider myself: |
+|       | 3.      Some people are generally very happy. They enjoy life regardless of what is going on, getting the most out of everything. To what extent does this characterization describe you? |
+|       | 4.      Some people are generally not very happy. Although they are not depressed, they never seem as happy as they might be. To what extent does this characterization describe you? (reversed) |
+
+
+
+## Health
+### Overall Physical Health
+
+```{r}
+d.all.f %<>% 
+  mutate(
+    health_sickeasier_r = health_health_sickeasierR,
+    health_worse_r = health_health_worse_r,
+    health_healthyanybody = health_health_healthyanybody,
+    health_excellent = health_health_excellent,
+    health_sickeasier_r_use_this = 6 - health_sickeasier_r,
+    health_worse_r_use_this = 6 - health_worse_r)
+```
+
+#### Summarizing items
+```{r}
+vector_healthmosoverall <- quos(health_overall, health_sickeasier_r_use_this, health_healthyanybody, health_worse_r_use_this, health_excellent)
+
+table.describe(d.all.f, vector_healthmosoverall)
+```
+
+#### Reliability analysis
+
+```{r}
+alpha_healthmosoverall <- alphatize(d.all.f, vector_healthmosoverall) # Alpha: 0.77
+
+alphatize_full(d.all.f, vector_healthmosoverall)
+
+corr_table(d.all.f, vector_healthmosoverall)
+
+health <- d.all.f %>% filter(startedSYFUS == 1) %>%  select(starts_with("health"))
+rm(health)
+```
+
+#### Factor analysis
+```{r}
+factor_analysis(d.all.f, vector_healthmosoverall)
+```
+
+#### Compute and review Overall Physical Health Composite
+```{r}
+d.all.f %<>% cv_compute(cv_name = healthmosoverall_comp5, cv_vector = vector_healthmosoverall)
+```
+
+```{r}
+hist(d.all.f$healthmosoverall_comp5)
+boxplot(d.all.f$healthmosoverall_comp5)
+```
+
+| Overall Physical Health (healthmosoverall_comp5) | ${\alpha}$ = `r alpha_healthmosoverall`|
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Poor/Definitely false ... 5 = Excellent/Definitely true | 
+| Items | 1. In general, would you say your health is:  |
+|       | 2.      I seem to get sick a little easier than other people. (reversed) |
+|       | 3.      I am as healthy as anybody I know. |
+|       | 4.      I expect my health to get worse. (reversed) |
+|       | 5.      My health is excellent. | 
+
+### Perceived Stress Scale (Secondary Appraisal)
+
+```{r}
+d.all.f %<>% 
+  mutate(pss_handle_r_use_this = 6- pss_handle_r,
+         pss_yourway_r_use_this = 6 - pss_yourway_r)
+```
+
+#### Summarizing items
+```{r}
+vector_pss <- quos(pss_unable, pss_handle_r_use_this, pss_yourway_r_use_this, pss_difficulties)
+
+table.describe(d.all.f, vector_pss)
+```
+
+#### Reliability analysis
+
+```{r}
+alpha_pss <- alphatize(d.all.f, vector_pss)
+
+alphatize_full(d.all.f, vector_pss)
+
+corr_table(d.all.f, vector_pss)
+```
+
+#### Factor analysis
+```{r}
+factor_analysis(d.all.f, vector_pss) ##Items 4 and 6 don't fit. 
+```
+
+#### Compute and review PSS Composite
+```{r}
+d.all.f %<>% cv_compute(cv_name = pss_comp4, cv_vector = vector_pss)
+```
+
+```{r}
+hist(d.all.f$pss_comp4)
+boxplot(d.all.f$pss_comp4)
+```
+
+| Perceived stress scale (pss_comp4) | ${\alpha}$ = `r alpha_pss`|
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Never ... 5 = Very often |
+| Items | 1.      In the last month of school, how often have you felt that you were unable to control the important things in your life? |
+|       | 2.      In the last month of school, how often have you felt confident about your ability to handle your personal problems? (reversed) |
+|       | 3.      In the last month of school, how often have you felt that things were going your way? (reversed) |
+|       | 4.      In the last month of school, how often have you felt difficulties were piling up so high that you could not overcome them? |
+
+### Overall Mental Health
+
+```{r}
+d.all.f %<>% 
+  mutate(
+    screener_anxnervous = screener_screener_anxnervous,
+    screener_anxworry = screener_screener_anxworry,
+    screener_deplittleinterest = screener_screener_dep_littleinterest,
+    screener_dephopeless = screener_screener_dephopelessness,
+    screener_anxnervous_new_scale = screener_anxnervous - 1,
+    screener_anxworry_new_scale = screener_anxworry - 1,
+    screener_deplittleinterest_new_scale = screener_deplittleinterest - 1,
+    screener_dephopeless_new_scale = screener_dephopeless - 1,
+    screener_anxnervous_new_scale_r = 4 - screener_anxnervous,
+    screener_anxworry_new_scale_r = 4 - screener_anxworry,
+    screener_deplittleinterest_new_scale_r = 4 - screener_deplittleinterest,
+    screener_dephopeless_new_scale_r = 4 - screener_dephopeless,
+    mhealthgeneral_z = scale(mhealth_general),
+    screener_anxnervous_new_scale_r_z = scale(screener_anxnervous_new_scale_r),
+    screener_anxworry_new_scale_r_z = scale(screener_anxworry_new_scale_r),
+    screener_deplittleinterest_new_scale_r_z = scale(screener_deplittleinterest_new_scale_r),
+    screener_dephopeless_new_scale_r_z = scale(screener_dephopeless_new_scale_r))
+```
+
+#### Summarizing items
+```{r}
+vector_overallmentalhealth_nz <- quos(mhealth_general, screener_anxnervous_new_scale_r,
+    screener_anxworry_new_scale_r,
+    screener_deplittleinterest_new_scale_r,
+    screener_dephopeless_new_scale_r)
+
+table.describe(d.all.f, vector_overallmentalhealth_nz)
+
+vector_overallmentalhealth <- quos(mhealthgeneral_z, screener_anxnervous_new_scale_r_z, screener_anxworry_new_scale_r_z, screener_deplittleinterest_new_scale_r_z, screener_dephopeless_new_scale_r_z)
+
+table.describe(d.all.f, vector_overallmentalhealth)
+```
+
+#### Reliability analysis
+```{r}
+alpha_overallmentalhealth <- alphatize(d.all.f, vector_overallmentalhealth) # Alpha: 0.89
+
+alphatize_full(d.all.f, vector_overallmentalhealth)
+
+corr_table(d.all.f, vector_overallmentalhealth)
+```
+
+#### Factor analysis
+```{r}
+factor_analysis(d.all.f, vector_overallmentalhealth)
+```
+
+#### Compute and review Overall Mental Health Composite
+```{r}
+d.all.f %<>% cv_compute(cv_name = overallmentalhealth_comp5_z, cv_vector = vector_overallmentalhealth)
+```
+
+```{r}
+hist(d.all.f$overallmentalhealth_comp5_z)
+boxplot(d.all.f$overallmentalhealth_comp5_z)
+```
+
+| Overall Mental Health (overallmentalhealth_comp5_z) | ${\alpha}$ = `r alpha_overallmentalhealth`|
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | Standardized (z-scored) | 
+| Scale | 1 = Poor ... 5 = Excellent | 
+| Item  | 1. In general, would you say your mental health is: |
+| Scale | 0 = Not at all ... 3 = Nearly every day | 
+|       | Over the last 2 weeks, how often have you been bothered by the following problems? |
+| Items | 2.      Feeling nervous, anxious, or on edge. (reversed) |
+|       | 3.      Not being able to stop or control worrying. (reversed) |
+|       | 4.      Little interest or pleasure in doing things. (reversed) |
+|       | 5.      Feeling down, depressed, or hopeless. (reversed) | 
+Note: First, I reverse coded items 2 to 5. Then, I standardized each individual item. And finally, I averaged all of them together.
+
+
+
+## Political Engagement
+### Activism
+```{r}
+d.all.f %<>% mutate(activism_hours_use_this = activism_hours - 1,
+                    activism_hours_use_this_z = scale(activism_hours_use_this),
+                    activism_engaged_z = scale(activism_engaged))
+
+vector_activism_hours <- quos(activism_hours, activism_hours_use_this)
+
+table.describe(d.all.f, vector_activism_hours)
+
+vector_activism <- quos(activism_engaged, activism_hours_use_this)
+table.describe(d.all.f, vector_activism)
+
+vector_activism_z <- quos(activism_engaged_z, activism_hours_use_this_z)
+table.describe(d.all.f, vector_activism_z)
+```
+#### Correlational analysis
+
+```{r}
+corr_table(d.all.f, vector_activism)
+corr_table(d.all.f, vector_activism_z)
+```
+
+#### Compute and review Activism Composite
+```{r}
+d.all.f %<>% cv_compute(cv_name = activism_z_comp2, cv_vector = vector_activism_z)
+```
+
+```{r}
+hist(d.all.f$activism_z_comp2)
+boxplot(d.all.f$activism_z_comp2)
+```
+
+| Activism (activism_z_comp2) | |
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | Standardized (z-scored) | 
+| Scale | 1 = Not at all engaged ... 7 = Extremely engaged |
+| Item  | 1.      Overall, how engaged are you in organizations or groups to help, empower, or serve other people (e.g., community service, social justice, volunteering)? |
+| Scale | 0 = 0 hours per week ... 20 = 20 or more hours |
+| Item  | 2.      During the school year, approximately how many hours per week do you spend working with organizations or groups that help, empower, or serve other people (e.g., community service, social justice, volunteering)? |
+
+
+
+## Other Variables
+### Perfectionism
+#### Summarizing items
+```{r}
+d.all.f %<>% mutate(perf_neversat_r = 8 - perf_neversat, 
+                   perf_notsatbest_r = 8 - perf_notsatbest)
+
+vector_perf <- quos(perf_highexpect, perf_neversat, perf_notsatbest)
+vector_perf_r <- quos(perf_highexpect, perf_neversat_r, perf_notsatbest_r)
+vector_perf_satisf <- quos(perf_neversat, perf_notsatbest)
+
+table.describe(d.all.f, vector_perf)
+table.describe(d.all.f, vector_perf_r)
+```
+
+#### Reliability and correlational analyses
+
+Item of high expectations does not correlate as much with the never satisfied items. Break down prefectionism into high expectations and never satisfied. 
+
+```{r}
+alpha_perf <- alphatize(d.all.f, vector_perf)
+
+alphatize_full(d.all.f, vector_perf)
+
+corr_table(d.all.f, vector_perf)
+
+corr_table(d.all.f, vector_perf_r)
+```
+
+#### Compute and review Perfectionism: High Standards and Perfectionism: Never Satisfied Composite
+```{r}
+d.all.f %<>% cv_compute(cv_name = perf_notsat_comp2, cv_vector = vector_perf_satisf)
+```
+
+```{r}
+hist(d.all.f$perf_highexpect)
+```
+
+| Perfectionism: High Standards (perf_highexpect) | |
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Strongly disagree ... 7 = Strongly agree |
+| Items | 1.      I have very high expectations for myself. |
+
+```{r}
+hist(d.all.f$perf_notsat_comp2)
+boxplot(d.all.f$perf_notsat_comp2)
+```
+
+| Perfectionism: Never Satisfied (perf_notsat_comp2) | |
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Strongly disagree ... 7 = Strongly agree |
+| Items | 1.      I am never satisfied with my accomplishments. |
+|       | 2.      I am not satisfied even when I know I have done my best. |
+
+### Recode Manipulation Check
+
+```{r}
+attr(d.all.f$t1manipcheck, "names")
+
+d.all.f %<>%
+  mutate(t1manipcheck_binary_num  = ifelse(t1manipcheck_binary == 0, NA,
+                                      ifelse(t1manipcheck_binary == 2, 0, t1manipcheck_binary)))
+
+d.all.f %>% count(t1manipcheck_binary, t1manipcheck_binary_num)
+```
+
+# Export cleaned dataset for analysis
+
+```{r}
+d.all %>% write_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7.rds")
+d.all %>% write_csv("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7.csv")
+
+
+d.all.f %>% write_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned.rds")
+
+d.all.f %>% write_csv("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned.csv")
+```
+

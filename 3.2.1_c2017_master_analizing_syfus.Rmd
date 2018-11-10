@@ -1,0 +1,773 @@
+---
+title: "Analyses Senior Year Survey (Cohort 2017): Linear Regressions"
+author: "Juan Ospina"
+date: "9/24/2018"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+    number_sections: TRUE
+---
+
+```{r clean system, message=TRUE, warning=TRUE, include=FALSE}
+rm(list = ls()) # clean environment
+```
+
+```{r global options, echo=FALSE}
+knitr::opts_chunk$set(
+  # fig.path = '../plots/', fig.show = 'asis', dev = 'pdf',
+  dpi = 300, 
+  # include = FALSE, 
+  echo = FALSE, # run the code, show me only the graphs
+  warning = FALSE, message = FALSE, cache = FALSE)
+```
+
+```{r packages}
+# install.packages(c("RColorBrewer", "reshape2", "tidyverse"))
+# install.packages("apaTables", dependencies = TRUE)
+# install.packages("ez",dependencies = TRUE)
+# install.packages("devtools")
+# devtools::install_github("dstanley4/apaTables")
+# library(apaTables)
+library(magrittr)
+library(Hmisc)
+library(RColorBrewer)
+library(reshape2)
+library(tidyverse)
+library(emmeans) # to get adjusted means and to plot the summary statistics of models
+library(kableExtra)
+library(psych)
+library(apaTables)
+library(ez)
+library(grid) # For iterative plots
+library(gridExtra) # For iterative plots
+# library(MASS)
+# library(dplyr) # Load dplyr after MASS to be able to use select()
+```
+
+```{r data files}
+d <- read_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs_6Nov2018.rds")
+options(contrasts = c("contr.helmert", "contr.poly")) # ANOVA contrasts
+
+# d %<>% filter(!is.na(cd_purp_sc))
+```
+
+```{r load custom functions}
+source("../../../premat_intervention_jo/Research Assistants/scripts/custom_functions.R")
+```
+
+```{r custom functions}
+n_obs <- function(x) sum(!is.na(x))
+mn <- function(x) round(mean(x, na.rm = TRUE), 2)
+mdn <- function(x) median(x, na.rm = TRUE)
+std <- function(x) round(sd(x, na.rm = TRUE), 2)
+lb <- function(x) round(mean(x, na.rm = TRUE) - sd(x, na.rm = TRUE), 2)
+ub <- function(x) round(mean(x, na.rm = TRUE) + sd(x, na.rm = TRUE), 2)
+
+ cv_compute <- function(data, cv_name, cv_vector){
+   cv_name <- enquo(cv_name)
+   data %>% 
+       rowwise() %>% 
+       mutate(!!quo_name(cv_name) := mean(c(!!!cv_vector), na.rm = TRUE)) %>% 
+       ungroup()
+ }
+
+sum_stats_round_new2 <- function(data, factor1, factor2, variable) {
+  ftr1 <- enquo(factor1)
+  ftr2 <- enquo(factor2)
+  var <- enquo(variable)
+  
+  data %>% 
+    group_by(!!!ftr1, !!!ftr2) %>% 
+    summarise(
+      n = n_obs(!!!var),
+      mean = mn(!!!var),
+      median = mdn(!!!var),
+      sd = std(!!!var),
+      lower = lb(!!!var),
+      upper = ub(!!!var))
+}
+
+geom_flat_violin <-
+  function(mapping = NULL,
+           data = NULL,
+           stat = "ydensity",
+           position = "dodge",
+           trim = TRUE,
+           scale = "area",
+           show.legend = NA,
+           inherit.aes = TRUE,
+           ...) {
+    ggplot2::layer(
+      data = data,
+      mapping = mapping,
+      stat = stat,
+      geom = GeomFlatViolin,
+      position = position,
+      show.legend = show.legend,
+      inherit.aes = inherit.aes,
+      params = list(trim = trim,
+                    scale = scale,
+                    ...)
+    )
+  }
+
+GeomFlatViolin <-
+  ggproto(
+    "GeomFlatViolin",
+    Geom,
+    setup_data = function(data, params) {
+      data$width <- data$width %||%
+        params$width %||% (resolution(data$x, FALSE) * 0.9)
+      
+      # ymin, ymax, xmin, and xmax define the bounding rectangle for each group
+      data %>%
+        dplyr::group_by(.data = ., group) %>%
+        dplyr::mutate(
+          .data = .,
+          ymin = min(y),
+          ymax = max(y),
+          xmin = x,
+          xmax = x + width / 2
+        )
+    },
+    
+    draw_group = function(data, panel_scales, coord)
+    {
+      # Find the points for the line to go all the way around
+      data <- base::transform(data,
+                              xminv = x,
+                              xmaxv = x + violinwidth * (xmax - x))
+      
+      # Make sure it's sorted properly to draw the outline
+      newdata <-
+        base::rbind(
+          dplyr::arrange(.data = base::transform(data, x = xminv), y),
+          dplyr::arrange(.data = base::transform(data, x = xmaxv), -y)
+        )
+      
+      # Close the polygon: set first and last point the same
+      # Needed for coord_polar and such
+      newdata <- rbind(newdata, newdata[1,])
+      
+      ggplot2:::ggname("geom_flat_violin",
+                       GeomPolygon$draw_panel(newdata, panel_scales, coord))
+    },
+    
+    draw_key = draw_key_polygon,
+    
+    default_aes = ggplot2::aes(
+      weight = 1,
+      colour = "grey20",
+      fill = "white",
+      size = 0.5,
+      alpha = NA,
+      linetype = "solid"
+    ),
+    
+    required_aes = c("x", "y")
+  )
+
+```
+
+```{r raincloud plots custom functions}
+plot_raincloud <- function(data, factor, variable, x_color, labs_y, labels_x, 
+                           scale, coord_cartesian, group_var, group_names, theme) {
+  ftr <- enquo(factor)
+  var <- enquo(variable)
+  group_var <- enquo(group_var)
+  
+  data %>% 
+    ggplot(aes_(y = var, x = ftr, fill = ftr)) +
+    raincloud_violin +
+    geom_point(aes_(y = var, color = ftr), 
+               position = position_jitter(width = .15), size = .5, alpha = 0.8) +
+    stat_summary_se + raincloud_boxplot + raincloud_guides + raincloud_theme_light + raincloud_theme +
+    x_color + labs_y + labels_x + theme1 + theme +
+    scale + coord_cartesian +
+    facet_grid(, vars(!!group_var), labeller = as_labeller(group_names)) # ignore warning, this is to make the plot facet the variables in the way that we want it
+}
+
+# Example:
+# d %>% 
+# ggplot(aes(y = healthmosoverall_comp5, x = treat, fill = treat)) +
+#   raincloud_violin +
+#   geom_point(aes(y = healthmosoverall_comp5, color = treat), 
+#              position = position_jitter(width = .15), size = .5, alpha = 0.8) +
+#   geom_point(data = sum_stats_healthmosoverall_comp5_cond, aes(x = treat, y = mean),
+#              position = position_nudge(x = 0.3), size = 1.5) +
+#   stat_summary_se + raincloud_boxplot + raincloud_guides + raincloud_theme_light + raincloud_theme +
+#   facet_grid(~ disadv) +
+#   labs(x = "Condition", y = "Overall physical health", fill = "Condition")
+
+
+raincloud_point <- function(data, factor, mn) {
+  ftr <- enquo(factor)
+  mn <- enquo(mn)
+  
+geom_point(data = data, aes_(x = ftr, y = mn), 
+             position = position_nudge(x = 0.3), size = 1.5)
+}
+
+raincloud_theme <- 
+  theme(text = element_text(size = 10),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        axis.text = element_text(size = 10),
+        axis.text.x = element_text(angle = 0, vjust = 0),
+        legend.title = element_text(size = 16),
+        legend.text = element_text(size = 16),
+        legend.position = "right",
+        plot.title = element_text(lineheight = .8, face = "bold", size = 16),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line.x = element_line(colour = 'black', size = 0.5, linetype = 'solid'),
+        axis.line.y = element_line(colour = 'black', size = 0.5, linetype = 'solid'),
+        strip.text = element_text(color = "Black"), strip.background = element_blank())
+
+raincloud_boxplot <-
+  geom_boxplot(width = .1, guides = FALSE, outlier.shape = NA, alpha = 0.5)
+
+raincloud_guides <- 
+  guides(fill = FALSE, color = FALSE)
+
+# raincloud_guides <- 
+#   guides(fill=guide_legend(
+#                  keywidth=0.1,
+#                  keyheight=0.1,
+#                  default.unit="inch"))
+  
+raincloud_theme_light <- 
+  theme_light()
+
+raincloud_violin <- 
+  geom_flat_violin(position = position_nudge(x = .2, y = 0), alpha = .8)
+
+stat_summary_se <- 
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = .1, position = position_nudge(x = .3, y = 0))
+```
+
+
+```{r custom functions describe sample}
+table.describe <- function(data, vector){
+  data %>% select(!!!vector) %>% describe %>% round(., digits = 2) %>% kable 
+}
+```
+
+
+```{r custom functions save ggplot2 plots}
+name_plots <- function(name = dv){
+  str_c("../plots/plot_", name, ".pdf")
+}
+
+save_plots <- function(df, plots){
+  df %<>% 
+  mutate(file_names = map_chr(dv, name_plots))
+
+map2(
+  df$file_names, 
+  plots, 
+  ggsave, 
+  dpi = 300
+  # device = 'pdf',
+   # height = 4,
+   # width = 6
+)
+}
+```
+
+
+```{r}
+vars_cont <- 
+  quos(
+    t4indepcomp4,
+    t4interdepcomp4,
+    t4purposeindepcomp7, 
+    t4purposeindepcomp5,
+    t4purpose_prosocialcomp3, 
+    t4purpose_prosocialcomp6
+    ) 
+```
+
+# General Notes
+
+*    All the analyses are using simple contrasts. Follow this link if you would like to know more:
+
+https://stats.idre.ucla.edu/r/library/r-library-contrast-coding-systems-for-categorical-variables/
+
+<!-- *    Legend plots color: -->
+
+<!-- ![](../plots/Legend.png) -->
+
+
+# Descriptive Statistics
+
+## Overall
+```{r}
+d %>% 
+  select(!!!vars_cont) %>% 
+  describe %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var = "dv_name") %>% 
+  mutate_at(vars(-dv_name), funs(round(., digits = 2))) %>% 
+  kable_format
+
+# To check which variables are better to perform Logistic Regressions
+# d %>% 
+#   select(!!!vars_cont) %>% 
+#   describe %>% 
+#   as.data.frame() %>% 
+#   rownames_to_column(var = "dv_name") %>% 
+#   filter(min == 0 & max == 1) %>% 
+#   select(dv_name)
+```
+
+## By Treatment and Gender
+
+```{r}
+treat_gend <- list(d$cd_purp_sc, d$gend_sc)
+
+d %>% 
+  select(!!!vars_cont) %>% 
+  describeBy(treat_gend, mat = TRUE, digits = 2) %>% 
+  kable_format
+```
+
+# Raincloud plots
+
+```{r plot settings}
+# These elements are not going to change from plot to plot, so I added them here so we don't have to copy paste unnecesary code
+pd1 <- position_dodge()
+pd2 <- position_dodge(0.1)
+pd3 <- position_dodge(width = 0.9)
+black1 <- element_text(color = "White")
+black2 <- element_rect(fill = "black", colour = "Black", size = NULL, linetype = NULL, color = "Black", inherit.blank = FALSE)
+
+# theme.cond <- theme(strip.text = black1, strip.background = black2, axis.text = element_text(size = 12),
+#         axis.title = element_text(size = 14), strip.text.x = element_text(size = 14, colour = "white"),
+#         panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+theme1 <- theme_light()
+# theme1 <- theme_classic()
+pd4 <- position_stack(vjust = 1.1)
+
+cond_legend <- scale_color_manual(name = "", 
+                                  labels = c("Randomized Control Group    ", 
+                                             "Purpose for Learning Treatment"),
+                                  values = c("ctl" = "salmon", 
+                                             "purp" = "steelblue2"))
+
+color_cond <- scale_fill_manual(name = "", 
+                                labels = c("Randomized Control Group    ", 
+                                            "Purpose for Learning Treatment"),
+                                values = c("ctl" = "salmon", 
+                                           "purp" = "steelblue2")) # add only to graphs between treatment and control
+
+positions_cond <- c("ctl", "purp")
+
+labels_cond <- scale_x_discrete(labels = c('Control','Purpose'), limits = positions_cond)
+
+gend_names <-
+  c('m' = "Male",
+    'f' = "Female")
+
+
+mean_round3 <- geom_text(aes(label = format(emmean, digits = 3), y = 1))
+mean_round3_10 <- geom_text(aes(label = format(emmean, digits = 3), y = .5))
+mean_round3_50 <- geom_text(aes(label = format(emmean, digits = 3), y = 2))
+mean_round3_100 <- geom_text(aes(label = format(emmean, digits = 3), y = 4))
+
+error_bar <- geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = .2, position = pd2)
+
+```
+
+```{r}
+tribble_dv <- tribble(
+  ~dv,                            ~dv_name,                             ~scale,              ~limit,       ~position,     ~subheader,
+  #------------------------------|-------------------------------------|--------------------|-------------|----------
+  "t4indepcomp4",                 "Composite:\nIndependent Opportunities",          seq(1, 5, 1),        c(1, 5),      1.5, "",
+  "t4interdepcomp4",              "Composite:\nInterdependent Opportunities",          seq(1, 5, 1),        c(1, 5),      1.5, "",
+  "t4purposeindepcomp7",          "Composite:\nIndependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(7 Items)",
+  "t4purposeindepcomp5",          "Composite:\nIndependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(5 Items)",
+  "t4purpose_prosocialcomp3",     "Composite:\nInterdependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(3 Items)",
+  "t4purpose_prosocialcomp6",     "Composite:\nInterdependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(6 Items)"
+  )
+
+tribble_cond <- data.frame(matrix(c("cd_purp_sc"), nrow = nrow(tribble_dv)))
+
+names_cond <- c("cd_purp_sc")
+colnames(tribble_cond) <- names_cond
+
+tribble_comb <- bind_cols(tribble_dv, tribble_cond)
+```
+
+## By Treatment and Gender
+
+```{r}
+theme <- theme(strip.text = black1, 
+               strip.background = black2, 
+               axis.text = element_text(size = 22, family = "Helvetica"),
+               axis.title = element_text(size = 22, family = "Helvetica"), 
+               strip.text.x = element_text(size = 22, colour = "white", family = "Helvetica"),
+               plot.title = element_text(size = 22, hjust = 0.5),
+               plot.subtitle = element_text(size = 15, hjust = 0.5),
+               panel.grid.major = element_blank(), 
+               panel.grid.minor = element_blank(),
+               axis.title.x = element_blank(),
+               # axis.text.x = element_blank(),
+               axis.ticks.x = element_blank(),
+               legend.position = 'top',
+               legend.key = element_rect(size = 10),
+               legend.key.size = unit(1, 'lines')
+               )
+
+plot_raincloud_map_cond_gend <- function(ftr, var, y_lab, scales, limit, subheader) d %>% 
+  filter(!is.na(get(var))) %>% 
+  ggplot(aes(y = get(var), x = get(ftr), fill = get(ftr))) +
+  raincloud_violin +
+  geom_point(aes(y = get(var), color = get(ftr)), 
+             position = position_jitter(width = .15), size = .5, alpha = 0.8) +
+  # geom_point(data = d, aes(0, 0, colour = get(ftr)), size = 0, shape = 15) + # to add space between key legends
+  # guides(color = guide_legend(override.aes = list(linetype = 0, size = 5))) +  # to add space between key legends
+  stat_summary_se + raincloud_boxplot + 
+  # raincloud_guides + # uncomment to hide the legend
+  raincloud_theme_light + raincloud_theme +
+  color_cond + cond_legend + labels_cond + 
+  theme1 + theme + xlab("") + 
+  coord_cartesian(ylim = limit) +
+  scale_y_continuous(breaks = scales) +
+  facet_grid(, vars(gend_sc), labeller = as_labeller(gend_names)) + # ignore warning, this is to make the plot facet the variables in the way that we want it
+  ylab("") + ggtitle(y_lab) + labs(subtitle = subheader)
+
+plots <- 
+  mapply(plot_raincloud_map_cond_gend, # function
+         tribble_comb[,"cd_purp_sc"] %>% t, tribble_comb[,"dv"] %>% t, # arguments
+         tribble_comb[,"dv_name"] %>% t, tribble_comb[,"scale"] %>% t, 
+         tribble_comb[,"limit"] %>% t, tribble_comb[,"subheader"] %>% t, SIMPLIFY = F)
+
+plots
+```
+
+# Effect sizes
+
+## Is there inequality?
+
+We want to focus on the effect sizes between advantaged and disadvantaged participants in the control group.
+
+### Inequalities between Whites and Blacks participants in Control and Belonging
+
+Effect sizes (Cohen's *d*) between advantaged and disadvantaged participants in control:
+
+```{r}
+cohend_ineq <- 
+  cohen.d.by(x = d %>% 
+               select(gend_num, cond_num, 
+                      !!!vars_cont),
+             group = "gend_num", 
+             group2 = "cond_num", 
+             alpha = .05) 
+
+cohend_ineq
+```
+
+## Is there a gender effect?
+
+### Differences between Males and Females
+
+```{r}
+cohend_race_all <- cohen.d(d %>% select(gend_num, !!!vars_cont), group = "gend_num", alpha = .05)
+
+cohend_race_all
+```
+
+## Is there a treatment effect?
+
+### Differences between Control and Belonging for all participants
+
+```{r}
+cohend_cond_all <- cohen.d(d %>% select(cd_purp_num, !!!vars_cont), group = "cd_purp_num", alpha = .05)
+
+cohend_cond_all
+```
+
+### Differences between Control and Purpose for Learning for Male and Female participants
+
+Effect sizes (Cohen's *d*) between control and purpose for males and females:
+
+```{r}
+cohend_cond <- cohen.d.by(x = d %>% select(cd_purp_num, gend_num, !!!vars_cont), group = "cd_purp_num", group2 = "gend_num", alpha = .05)
+
+cohend_cond
+```
+
+# Models
+
+## Example
+```{r}
+lm(t4purpose_prosocialcomp6 ~ cd_purp_sc*gend_sc, data = d) %>% summary
+```
+
+```{r}
+vars_ivs <- quos(id, cd_purp_sc, gend_sc
+                 # sattoact, hsrank, hsrank_no, gender # covariates
+                 )
+
+d.gather <- d %>%
+  select(!!!vars_ivs, !!!vars_cont) %>% 
+  gather(key = dv_name, value = dv_value, !!!vars_cont)
+
+d.nest <- 
+  d.gather %>% 
+  group_by(dv_name) %>% 
+  nest()
+
+# d.nest$data[[1]]
+
+lm_model <- function(data){
+  lm(dv_value ~ cd_purp_sc*gend_sc, data = data)
+}
+
+d.nest %<>% mutate(lm_model = map(.x = data, .f = lm_model))
+
+d.nest %<>%
+  mutate(
+    glance = lm_model %>% map(broom::glance),
+    rsq = glance %>% map_dbl("r.squared"),
+    tidy = lm_model %>% map(broom::tidy),
+    augment = lm_model %>% map(broom::augment)
+  )
+
+d.nest %<>% 
+  mutate(
+    emmean_cond = pmap(
+      .l = list(
+        object = lm_model, 
+        specs = "cd_purp_sc", 
+        by = "gend_sc"
+      ),
+      .f = emmeans
+    ),
+    emmean_cond_df = map(
+      .x = emmean_cond, 
+      .f = data.frame),
+    emmean_cond_sc = map(
+      .x = emmean_cond,
+      .f = pairs,
+      reverse = TRUE
+    ),
+    emmean_cond_sc_df = map(
+      .x = emmean_cond_sc, 
+      .f = data.frame),
+    
+    emmean_ineq = pmap( # Inequality
+      .l = list(
+        object = lm_model, 
+        specs = "gend_sc", 
+        by = "cd_purp_sc"
+      ),
+      .f = emmeans
+    ),
+    emmean_ineq_df = map(
+      .x = emmean_ineq, 
+      .f = data.frame),
+    emmean_ineq_sc = map(
+      .x = emmean_ineq,
+      .f = pairs,
+      reverse = TRUE
+    ),
+    emmean_ineq_sc_df = map(
+      .x = emmean_ineq_sc, 
+      .f = data.frame)
+  ) 
+```
+
+## Glance Overall Fit of Models
+
+```{r}
+dvs_col <- 
+  d.gather %>% 
+  select(dv_name) %>% 
+  unique
+
+dvs_col %>% 
+  bind_cols(d.nest$glance %>% bind_rows) %>% 
+  kable_format
+```
+
+## Main Effects and Interactions
+
+### By Condition and Race
+```{r}
+dvs_col_rep <- dvs_col$dv_name %>% 
+  rep(each = 4) %>% # change this number depending on the number of rows of your tidy datasets
+  as.tibble %>% 
+  rename(dv_name = value)
+
+dvs_col_rep %>% 
+  bind_cols(d.nest$tidy %>% bind_rows) %>% 
+  kable_format
+```
+
+## Simple Effects
+
+### Gender Inequality By Condition
+
+```{r}
+dvs_col_rep <- dvs_col$dv_name %>% 
+  rep(each = 2) %>% # change this number depending on the number of rows of your tidy datasets
+  as.tibble %>% 
+  rename(dv_name = value)
+
+dvs_col_rep %>% 
+  bind_cols(d.nest$emmean_ineq_sc_df %>% bind_rows) %>% 
+  kable_format
+```
+
+### Treatment Effects
+
+```{r}
+dvs_col_rep <- dvs_col$dv_name %>% 
+  rep(each = 2) %>% # change this number depending on the number of rows of your tidy datasets
+  as.tibble %>% 
+  rename(dv_name = value)
+
+dvs_col_rep %>% 
+  bind_cols(d.nest$emmean_cond_sc_df %>% bind_rows) %>% 
+  kable_format
+
+# d.nest$emmean_cond_sc_df[[1]]
+```
+
+# Bar Plots
+
+## By Treatment and Race
+
+```{r}
+d.unnest_cond <-
+  d.nest %>% 
+  unnest(emmean_cond_df) %>% 
+  spread(key = dv_name, value = emmean)
+```
+
+```{r}
+guides_no <- guides(fill = FALSE, color = FALSE)
+
+plot_bar_x_y_group_cond_gend <- function(ftr, var, y_lab, scales, limit, position,
+                                         # bar_border, 
+                                         decimal, subheader) d.unnest_cond %>% 
+  filter(!is.na(get(var))) %>% 
+  ggplot(aes(x = get(ftr), y = get(var), color = get(ftr), group = get(ftr))) + # Remember to add get()
+  # geom_bar(position = pd1, stat = "identity", colour = "black") + 
+  # geom_segment(aes(x = get(ftr), xend = get(ftr), y = -10, yend = get(var)), size = 42, color = "black") +
+  geom_segment(aes(x = get(ftr), xend = get(ftr), y = -10, yend = get(var) 
+                   # - bar_border
+                   ), size = 41) +
+  geom_errorbar(aes(ymin = get(var) - SE, ymax = get(var) + SE), width = .4, position = pd2, color = "black") +
+  theme1 +
+  geom_text(aes(label = format(get(var), digits = decimal), y = position), size = 7, color = "black") +
+  coord_cartesian(ylim = limit) +
+  scale_y_continuous(breaks = scales) +
+  facet_grid(, vars(gend_sc), labeller = as_labeller(gend_names)) + # ignore warning, this is to make the plot facet the variables in the way that we want it
+  ylab("") + ggtitle(y_lab) + 
+  labels_cond +
+  color_cond + xlab("") + theme + 
+  cond_legend +
+  theme + guides_no +
+  labs(subtitle = subheader)
+
+plots <- mapply(plot_bar_x_y_group_cond_gend, # function
+       tribble_comb["cd_purp_sc"] %>% t, tribble_comb["dv"] %>% t, # arguments
+       tribble_comb["dv_name"] %>% t, tribble_comb["scale"] %>% t, 
+       tribble_comb["limit"] %>% t, tribble_comb["position"] %>% t, 
+       # 0.02, 
+       3, tribble_comb["subheader"] %>% t,
+       SIMPLIFY = F)
+
+plots[[1]]
+```
+
+
+# Residual plots
+
+```{r}
+tribble_comb_all <-
+  tribble_comb %>% 
+  rename(
+    dv_name_pretty = dv_name,
+    dv_name = dv
+    )
+
+
+d.nest <- 
+  left_join(d.nest, tribble_comb_all, by = "dv_name")
+
+
+plot_fitted_residuals <- function(model = model, title = title){
+  plot(fitted(model),residuals(model), main = title, xlab = "Fitted", ylab = "Residual")
+}
+
+d.nest %>% 
+  mutate(
+    # residuals = map(
+    #   .x = lm_model, 
+    #   .f = residuals),
+    # fitted = map(
+    #   .x = lm_model, 
+    #   .f = fitted),
+    plot_fitted_residuals = map2(
+      .x = lm_model, 
+      .y = dv_name_pretty, 
+      .f = plot_fitted_residuals
+    )
+  )
+
+```
+
+
+# Mediation
+
+*Purpose for learning* lowers the degree of *independent opportunities* among males. Which in turn could increase the health and well-being.
+
+```{r}
+model <- lm(t4indepcomp4 ~ cd_purp_sc * gend_sc + sattoact + hsrank, data = d)
+pairs(emmeans(model, ~ cd_purp_sc | gend_sc))
+
+
+model <- lm(t4belongcomp8 ~ cd_purp_sc * gend_sc + sattoact + hsrank, data = d)
+pairs(emmeans(model, ~ cd_purp_sc | gend_sc))
+
+model <- lm(t4BUcomp2 ~ cd_purp_sc * gend_sc + sattoact + hsrank, data = d)
+pairs(emmeans(model, ~ cd_purp_sc | gend_sc))
+
+# t4BUsometime1, t4BUbad2
+
+model <- lm(happy_comp4 ~ cd_purp_sc * gend_sc + sattoact + hsrank, data = d) 
+summary(model)
+
+pairs(emmeans(model, ~ cd_purp_sc | gend_sc))
+
+vars_corr <- quos(cd_purp_num, t4belongcomp8, t4BUcomp2,
+                  t4indepcomp4,
+                  happy_comp4, pss_comp4)
+corr_table_p(d, vars_corr)
+
+
+model <- lm(happy_comp4 ~ t4indepcomp4 + sattoact + hsrank, data = d) 
+
+summary(model)
+
+# pairs(emtrends(model, ~ t4indepcomp4))
+
+# d %>% select(starts_with("t4B"))
+
+# t4Bbelong1, t4Bfitin2, t4Boutsider3R, t4Bhome4, t4Bundrstnd5R, t4Bsimsucc6, t4Baccept7, t4Bmystery8R
+# t4BUsometime1, t4BUbad2
+```
+
+```{r}
+
+```
+
+
+

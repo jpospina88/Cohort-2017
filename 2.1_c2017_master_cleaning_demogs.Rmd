@@ -1,0 +1,272 @@
+---
+title: 'Cleaning Master Dataset: All Surveys'
+author: "Juan Ospina"
+date: "11/1/2018"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+    number_sections: TRUE
+---
+
+```{r clean system, message=TRUE, warning=TRUE, include=FALSE}
+rm(list = ls()) # clean environment
+```
+
+```{r global options, echo=FALSE}
+knitr::opts_chunk$set(
+  # fig.path = 'figs/', fig.show = 'asis', dpi = 300, 
+  # include = FALSE, 
+  echo = FALSE, # run the code, show me only the graphs
+  warning = FALSE, message = FALSE, cache = FALSE)
+```
+
+```{r packages}
+library(magrittr)
+library(Hmisc)
+library(RColorBrewer)
+library(reshape2)
+# library(MASS) # negative binomial models
+library(tidyverse)
+library(emmeans) # to get adjusted means and to plot the summary statistics of models
+library(kableExtra)
+library(psych)
+```
+
+```{r}
+d0 <- read_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned.rds")
+```
+
+
+```{r}
+source("../../../premat_intervention_jo/Research Assistants/scripts/custom_functions.R")
+```
+
+
+# Review Demographics
+
+```{r}
+# demographics <- c("race", "gend")
+# 
+# map2_chr(
+#   .x = d0, 
+#   .y = demographics, 
+#   .f = check_vars_by_keywords
+#   )
+```
+
+## Race
+
+These are all the variables that have the keyword "race":
+
+```{r}
+race <- c("race")
+check_vars_by_keywords(d0, race)
+```
+
+The variable *race* is the factor variable created from the numeric variable *race_nointl_wPI_USETHIS*. *race_intlfirst_wPI* includes International students.
+
+Labels from *race_nointl_wPI_USETHIS*:
+
+```{r}
+attr(d0$race_nointl_wPI_USETHIS, "labels")
+```
+
+Labels from *race_intlfirst_wPI*:
+
+```{r}
+attr(d0$race_intlfirst_wPI, "labels")
+```
+
+Number of participants by race:
+
+```{r}
+demogs <- quos(race_nointl_wPI_USETHIS, race_intlfirst_wPI, race)
+
+d0 %>% 
+  # filter(!is.na(race_nointl_wPI_USETHIS)) %>% 
+  demographics_pct(demogs)
+```
+
+## Gender
+
+These are all the variables that have the keyword "gend":
+
+```{r}
+gender <- c("gend")
+check_vars_by_keywords(d0, gender)
+```
+
+The variable *gend* is the factor variable created from the character variable *iGender*.
+
+Labels from *iGender*:
+
+```{r}
+attr(d0$iGender, "labels")
+```
+
+Number of participants by gender:
+
+```{r}
+demogs <- quos(iGender, gend)
+
+d0 %>% 
+  # filter(!is.na(race_nointl_wPI_USETHIS)) %>% 
+  demographics_pct(demogs)
+```
+
+## Social Class
+
+These are all the variables that have the keyword "ses":
+
+```{r}
+ses <- c("ses")
+check_vars_by_keywords(d0, ses)
+# social <- c("status")
+# check_vars_by_keywords(d0, social)
+```
+
+The variable *ses* is the factor variable created from the numeric variable *t1ses*. *ses_working_lowmiddle* is the factor variable created from the numeric variable *t1ses_workinglowermiddleclass*.
+
+Labels of *t1ses*:
+
+```{r}
+attr(d0$t1ses, "labels")
+```
+
+Number of participants by SES:
+
+```{r}
+d0 %<>% 
+  mutate(ses = 
+           factor(t1ses, labels = c("working", "low-middle", "middle", "upper-middle", "upper")),
+         ses_working_lowmiddle = 
+           factor(t1ses_workinglowermiddleclass, labels = c("middle-to-upper", "working-to-low-middle"))
+         )
+
+demogs <- quos(t1ses, ses, ses_working_lowmiddle, t1ses_workinglowermiddleclass)
+
+d0 %>% 
+  # filter(!is.na(race_nointl_wPI_USETHIS)) %>% 
+  demographics_pct(demogs)
+```
+
+## High School Status
+
+These are all the variables that have the keyword "hs":
+
+```{r}
+hs <- c("hs")
+check_vars_by_keywords(d0, hs)
+```
+
+The variable *hs_advantage* is the factor variable created from the numeric variable *t1hsadvantage*. *ses_working_lowmiddle* is the factor variable created from the numeric variable *t1ses_workinglowermiddleclass*.
+
+Labels of *t1hsadvantage*:
+
+```{r}
+attr(d0$t1hsadvantage, "labels")
+```
+
+Number of participants by High School Status:
+
+```{r}
+d0 %<>% 
+  mutate(hs_advantage = 
+           factor(t1hsadvantage, labels = c("adv hs", "neither adv nor disadv", "disadv hs"))
+         )
+
+demogs <- quos(t1hsadvantage, hs_advantage)
+
+d0 %>% 
+  # filter(!is.na(t1hsadvantage)) %>% 
+  demographics_pct(demogs)
+```
+
+## Parent Education
+
+These are all the variables that have the keyword "edu":
+
+```{r}
+check_vars_by_keywords(d0, c("edu"))
+```
+
+*     *mother_edu* is the factor variable created from the numeric variable *t1mothereduc*. 
+*     *father_edu* is the factor variable created from the numeric variable *t1fathereduc*.
+
+Labels of *t1mothereduc* (*t1fathereduc* has the same):
+
+```{r}
+attr(d0$t1mothereduc, "labels")
+```
+
+Number of participants by Parent Education:
+
+```{r}
+mother_edu <- c("less than hs", "hs grad", "some college", "associate", 
+                "bachelor", "some graduate", "master", "law", "medical", "doctoral", "don't know")
+
+father_edu <- c("less than hs", "hs grad", "some college", "associate", 
+                "bachelor", "some graduate", "master", "law", "medical", "doctoral", "don't know", "don't apply")
+
+d0 %<>% 
+  mutate(mother_edu = factor(t1mothereduc, labels = mother_edu),
+         father_edu = factor(t1fathereduc, labels = father_edu),
+         )
+
+demogs <- quos(mother_edu, t1mothereduc)
+
+d0 %>% 
+  # filter(!is.na(mother_edu)) %>% 
+  demographics_pct(demogs)
+
+demogs <- quos(father_edu, t1fathereduc)
+
+d0 %>% 
+  # filter(!is.na(father_edu)) %>% 
+  demographics_pct(demogs)
+```
+
+## First-Generation Status
+
+These are all the variables that have the keyword "firstgen":
+
+```{r}
+check_vars_by_keywords(d0, c("firstgen"))
+```
+
+*     *firstgen* is the factor variable created from the numeric variable *firstgen_reg_USETHIS*. 
+
+Labels of *firstgen_reg_USETHIS*:
+
+```{r}
+attr(d0$firstgen_reg_USETHIS, "labels")
+```
+
+Number of participants by First-Generation Status:
+
+```{r}
+demogs <- quos(firstgen, firstgen_reg_USETHIS)
+
+d0 %>% 
+  # filter(!is.na(firstgen)) %>% 
+  demographics_pct(demogs)
+```
+
+
+# Export dataset with cleaned demographics
+
+```{r}
+d0 %>% 
+  write_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs.rds")
+
+d0 %>% 
+  write_csv("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs.csv")
+```
+
+
+```{r}
+# d0 %>% count(t1condition, t1condition_Numeric)
+```
+
+

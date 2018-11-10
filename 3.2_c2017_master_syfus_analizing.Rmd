@@ -1,0 +1,3698 @@
+---
+title: "Analyse C2017 SYFUS"
+author: "Juan Ospina"
+date: "7/5/2018"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+    number_sections: TRUE
+---
+
+```{r clean system, message=TRUE, warning=TRUE, include=FALSE}
+rm(list = ls()) # clean environment
+```
+
+```{r global options, echo=FALSE}
+knitr::opts_chunk$set(
+  # fig.path = 'figs/', fig.show = 'asis', dpi = 300, 
+  # include = FALSE, 
+  echo = FALSE, # run the code, show me only the graphs
+  warning = FALSE, message = FALSE, cache = FALSE)
+```
+
+```{r packages}
+library(magrittr)
+library(Hmisc)
+library(RColorBrewer)
+library(reshape2)
+# library(MASS) # negative binomial models
+library(tidyverse)
+library(emmeans) # to get adjusted means and to plot the summary statistics of models
+library(kableExtra)
+library(psych)
+```
+
+```{r}
+# d.an <- read_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Filtered.rds") 
+d.an <- read_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs_6Nov2018.rds")
+```
+
+```{r custom functions}
+# sum_stats_round <- function(data, factors, variables) {
+#   data %>% 
+#     group_by(!!!factors) %>% 
+#     summarise(
+#       mean = round(mean(!!!variables, na.rm = TRUE), 2),
+#       sd = round(sd(!!!variables, na.rm = TRUE), 2))
+# }
+
+n_obs <- function(x) sum(!is.na(x))
+mn <- function(x) round(mean(x, na.rm = TRUE), 2)
+mdn <- function(x) median(x, na.rm = TRUE)
+std <- function(x) round(sd(x, na.rm = TRUE), 2)
+lb <- function(x) round(mean(x, na.rm = TRUE) - sd(x, na.rm = TRUE), 2)
+ub <- function(x) round(mean(x, na.rm = TRUE) + sd(x, na.rm = TRUE), 2)
+
+sum_stats_round <- function(data, factors, variables) {
+  data %>% 
+    group_by(!!!factors) %>% 
+    summarise(
+      n = n_obs(!!!variables),
+      mean = mn(!!!variables),
+      median = mdn(!!!variables),
+      sd = std(!!!variables),
+      lower = lb(!!!variables),
+      upper = ub(!!!variables))
+}
+
+sum_stats_round_new <- function(data, factors, variables) {
+  ftr <- enquo(factors)
+  var <- enquo(variables)
+  
+  data %>% 
+    group_by(!!!ftr) %>% 
+    summarise(
+      n = n_obs(!!!var),
+      mean = mn(!!!var),
+      median = mdn(!!!var),
+      sd = std(!!!var),
+      lower = lb(!!!var),
+      upper = ub(!!!var))
+}
+
+sum_stats_round_new2 <- function(data, factor1, factor2, variable) {
+  ftr1 <- enquo(factor1)
+  ftr2 <- enquo(factor2)
+  var <- enquo(variable)
+  
+  data %>% 
+    group_by(!!!ftr1, !!!ftr2) %>% 
+    summarise(
+      n = n_obs(!!!var),
+      mean = mn(!!!var),
+      median = mdn(!!!var),
+      sd = std(!!!var),
+      lower = lb(!!!var),
+      upper = ub(!!!var))
+}
+
+geom_flat_violin <-
+  function(mapping = NULL,
+           data = NULL,
+           stat = "ydensity",
+           position = "dodge",
+           trim = TRUE,
+           scale = "area",
+           show.legend = NA,
+           inherit.aes = TRUE,
+           ...) {
+    ggplot2::layer(
+      data = data,
+      mapping = mapping,
+      stat = stat,
+      geom = GeomFlatViolin,
+      position = position,
+      show.legend = show.legend,
+      inherit.aes = inherit.aes,
+      params = list(trim = trim,
+                    scale = scale,
+                    ...)
+    )
+  }
+
+GeomFlatViolin <-
+  ggproto(
+    "GeomFlatViolin",
+    Geom,
+    setup_data = function(data, params) {
+      data$width <- data$width %||%
+        params$width %||% (resolution(data$x, FALSE) * 0.9)
+      
+      # ymin, ymax, xmin, and xmax define the bounding rectangle for each group
+      data %>%
+        dplyr::group_by(.data = ., group) %>%
+        dplyr::mutate(
+          .data = .,
+          ymin = min(y),
+          ymax = max(y),
+          xmin = x,
+          xmax = x + width / 2
+        )
+    },
+    
+    draw_group = function(data, panel_scales, coord)
+    {
+      # Find the points for the line to go all the way around
+      data <- base::transform(data,
+                              xminv = x,
+                              xmaxv = x + violinwidth * (xmax - x))
+      
+      # Make sure it's sorted properly to draw the outline
+      newdata <-
+        base::rbind(
+          dplyr::arrange(.data = base::transform(data, x = xminv), y),
+          dplyr::arrange(.data = base::transform(data, x = xmaxv), -y)
+        )
+      
+      # Close the polygon: set first and last point the same
+      # Needed for coord_polar and such
+      newdata <- rbind(newdata, newdata[1,])
+      
+      ggplot2:::ggname("geom_flat_violin",
+                       GeomPolygon$draw_panel(newdata, panel_scales, coord))
+    },
+    
+    draw_key = draw_key_polygon,
+    
+    default_aes = ggplot2::aes(
+      weight = 1,
+      colour = "grey20",
+      fill = "white",
+      size = 0.5,
+      alpha = NA,
+      linetype = "solid"
+    ),
+    
+    required_aes = c("x", "y")
+  )
+```
+
+```{r raincloud plots custom functions}
+plot_raincloud <- function(data, factor, variable) {
+  ftr <- enquo(factor)
+  var <- enquo(variable)
+  
+  data %>% 
+    ggplot(aes_(y = var, x = ftr, fill = ftr)) +
+    raincloud_violin +
+    geom_point(aes_(y = var, color = ftr), 
+               position = position_jitter(width = .15), size = .5, alpha = 0.8) +
+    stat_summary_se + raincloud_boxplot + raincloud_guides + raincloud_theme_light + raincloud_theme +
+    labs(x = "Condition", fill = "Condition")
+}
+
+# Example:
+# d %>% 
+# ggplot(aes(y = healthmosoverall_comp5, x = treat, fill = treat)) +
+#   raincloud_violin +
+#   geom_point(aes(y = healthmosoverall_comp5, color = treat), 
+#              position = position_jitter(width = .15), size = .5, alpha = 0.8) +
+#   geom_point(data = sum_stats_healthmosoverall_comp5_treat, aes(x = treat, y = mean),
+#              position = position_nudge(x = 0.3), size = 1.5) +
+#   stat_summary_se + raincloud_boxplot + raincloud_guides + raincloud_theme_light + raincloud_theme +
+#   facet_grid(~ disadv) +
+#   labs(x = "Condition", y = "Overall physical health", fill = "Condition")
+
+
+raincloud_point <- function(data, factor, mn) {
+  ftr <- enquo(factor)
+  mn <- enquo(mn)
+  
+geom_point(data = data, aes_(x = ftr, y = mn), 
+             position = position_nudge(x = 0.3), size = 1.5)
+}
+
+raincloud_theme <- 
+  theme(text = element_text(size = 10),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        axis.text = element_text(size = 10),
+        axis.text.x = element_text(angle = 0, vjust = 0),
+        legend.title = element_text(size = 16),
+        legend.text = element_text(size = 16),
+        legend.position = "right",
+        plot.title = element_text(lineheight = .8, face = "bold", size = 16),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.line.x = element_line(colour = 'black', size = 0.5, linetype = 'solid'),
+        axis.line.y = element_line(colour = 'black', size = 0.5, linetype = 'solid'),
+        strip.text = element_text(color = "Black"), strip.background = element_blank())
+
+raincloud_boxplot <-
+  geom_boxplot(width = .1, guides = FALSE, outlier.shape = NA, alpha = 0.5)
+
+raincloud_guides <- 
+  guides(fill = FALSE, color = FALSE)
+  
+raincloud_theme_light <- 
+  theme_light()
+
+raincloud_violin <- 
+  geom_flat_violin(position = position_nudge(x = .2, y = 0), alpha = .8)
+
+stat_summary_se <- 
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = .1, position = position_nudge(x = .3, y = 0))
+```
+
+```{r bar plot settings}
+# These elements are not going to change from plot to plot, so I added them here so we don't have to copy paste unnecesary code
+pd1 <- position_dodge()
+pd2 <- position_dodge(0.1)
+pd3 <- position_dodge(width = 0.9)
+black1 <- element_text(color = "White")
+black2 <- element_rect(fill = "black", colour = "Black", size = NULL, linetype = NULL, color = "Black", inherit.blank = FALSE)
+
+theme <- theme(strip.text = black1, strip.background = black2, axis.text = element_text(size = 14),
+        axis.title = element_text(size = 14), strip.text.x = element_text(size = 14, colour = "white"), # "colour" changes the color of the facets
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+theme.cond <- theme(strip.text = black1, strip.background = black2, axis.text = element_text(size = 11),
+        axis.title = element_text(size = 14), strip.text.x = element_text(size = 14, colour = "white"),
+         panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+theme1 <- theme_light()
+# theme1 <- theme_classic()
+# theme1 <- theme_linedraw()
+# theme1 <- theme_minimal()
+# theme1 <- theme_void()
+
+guides_no <- guides(fill = FALSE)
+pd4 <- position_stack(vjust = 1.1)
+
+color_cd_purp <- scale_fill_manual("legend", values = c("ctl" = "salmon", "purp" = "#56B4E9"))
+
+color_treat <- scale_fill_manual("legend", values = c("ctl" = "salmon", "treat" = "#56B4E9")) # add only to graphs between treatment and control
+
+positions_treat <- c("ctl", "treat")
+labels_treat <- scale_x_discrete(labels = c('Control','Treatment'), limits = positions_treat)
+
+positions_cd_purp <- c("ctl", "purp")
+labels_cd_purp <- scale_x_discrete(labels = c('Control','Purpose'), limits = positions_cd_purp)
+
+positions_cond <- c("ctl", "bel", "cul", "wf")
+
+labels_cond <- scale_x_discrete(labels = c('Control', 'Belonging','Culture', 'Wise\nFeedback'), limits = positions_cond)
+
+color_cond <- scale_fill_manual("legend", values = c("ctl" = "#F8766D", "bel" = "#7CAE00", "cul" = "#00BFC4", "wf" = "#C77CFF"))
+
+adv_names <- 
+  c('adv'="Advantaged",
+    'disadv'="Disadvantaged")
+
+gend_names <- 
+  c('m'="Male",
+    'f'="Female")
+
+# Scales
+scale_y_4 <- scale_y_continuous(breaks = seq(1, 4, 1))
+scale_y_5 <- scale_y_continuous(breaks = seq(1, 5, 1))
+scale_y_7 <- scale_y_continuous(breaks = seq(1, 7, 1))
+scale_y_10 <- scale_y_continuous(breaks = seq(1, 10, 1))
+scale_y_100 <- scale_y_continuous(breaks = seq(1, 100, 20))
+scale_y_50 <- scale_y_continuous(breaks = seq(1, 50, 10))
+scale_y_z <- scale_y_continuous(breaks = seq(-1, 1, 0.25))
+
+scale_y_100 <- scale_y_continuous(breaks = seq(0, 100, 20))
+
+coord_cartesian_4 <- coord_cartesian(ylim = c(0, 4))
+coord_cartesian_5 <- coord_cartesian(ylim = c(1, 5))
+coord_cartesian_7 <- coord_cartesian(ylim = c(1, 7))
+coord_cartesian_10 <- coord_cartesian(ylim = c(1, 10))
+coord_cartesian_z <- coord_cartesian(ylim = c(-1, 1))
+
+coord_cartesian_100 <- coord_cartesian(ylim = c(0, 100))
+
+mean_round3 <- geom_text(aes(label = format(emmean, digits = 3), y = 1))
+mean_round_gpa <- geom_text(aes(label = format(emmean, digits = 3), y = .2))
+mean_roundz <- geom_text(aes(label = format(emmean, digits = 2), y = -.5))
+
+mean_round_pct <- geom_text(aes(label = paste0(format(prob*100, digits = 3), "%"), y = 5))
+
+error_bar <- geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = .2, position = pd2)
+
+group_levels_gend <- c('m','f')
+```
+
+```{r bar plot functions}
+plot_bar_x_y <- function(data = data, x_var = x_var, x_labels = x_labels, x_color = x_color,
+                               y_var = y_var, labs_y = labs_y,
+                               scale = scale, coord_cartesian = coord_cartesian, mean_round = mean_round) {
+x_var <- enquo(x_var)
+y_var <- enquo(y_var)
+
+data %>%
+  ggplot(aes(x = !!x_var, y = !!y_var, fill = !!x_var, group = !!x_var)) +
+  geom_bar(position = pd1, stat = "identity") + error_bar + theme1 + theme + guides_no + mean_round +
+  coord_cartesian + scale + # this is where you change the scale
+  x_labels + x_color + labs_y
+}
+
+# plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+#                    x_color = color_cd_purp,
+#                    y_var = emmean, labs_y = labs(x = "", y = "Belonging at College"),
+#                    scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+
+# Example:
+# You can use this code as long as you get the sum_stats of any model by any two catgorical variables (e.g. condition and disadvantaged status or condition and gender, or condition and race) by condition and disadvatanged status
+# plot_bar_purp_gend(sum_stats, scale_y_7, coord_cartesian_7, mean_round3) +
+#  labs(x = "", y = "Belonging at College")
+
+# General function version:
+# Need to specify more stuff but it's more general so you can use it with more grouping variables
+plot_bar_x_y_group <- function(data = data, x_var = x_var, x_labels = x_labels, x_color = x_color,
+                               y_var = y_var, labs_y = labs_y,
+                               group_var = group_var, group_names = group_names,
+                               scale = scale, coord_cartesian = coord_cartesian, mean_round = mean_round) {
+x_var <- enquo(x_var)
+y_var <- enquo(y_var)
+group_var <- enquo(group_var)
+
+data %>%
+  ggplot(aes(x = !!x_var, y = !!y_var, fill = !!x_var, group = !!x_var)) +
+  geom_bar(position = pd1, stat = "identity") + error_bar + theme1 + theme + guides_no + mean_round +
+  coord_cartesian + scale + # this is where you change the scale
+  facet_grid(, vars(!!group_var), labeller = as_labeller(group_names)) + # ignore warning, this is to make the plot facet the variables in the way that we want it
+  x_labels + x_color + labs_y
+}
+
+# Working example if you add this below the summary(model) of belonging at college
+# plot_bar_x_y_group(data = sum_stats, x_var = treat_ec, x_labels = labels_treat, x_color = color_treat,
+#                    y_var = emmean, labs_y = labs_purpose,
+#                    group_var = disadv_ec, group_names = adv_names,
+#                    scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+
+# Working function with mtcars
+plot_x_y_factor <- function(data = data, x_var = x_var, y_var = y_var, group_var = group_var){
+x_var <- enquo(x_var)
+y_var <- enquo(y_var)
+group_var <- enquo(group_var)
+
+ggplot(data, aes(!!x_var, !!y_var)) + 
+  geom_point() + 
+  facet_wrap(vars(!!group_var))
+}
+
+# Working example
+# plot_x_y_factor(data = mtcars, wt, mpg, cyl)
+```
+
+```{r custom functions describe sample}
+table.describe <- function(data, vector){
+  data %>% select(!!!vector) %>% describe %>% round(., digits = 2) %>% kable 
+}
+```
+
+```{r custom functions for linear regressions}
+lm_emmeans <- function(model = model, x_var_ct = x_var_ct){
+  emmeans(model, x_var_ct)
+}
+
+lm_kable_x <- function(lm_emmeans = lm_emmeans, x_var = x_var){
+  x_var <- enquo(x_var)
+  lm_emmeans %>% as.tibble() %>% mutate_at(vars(-c(!!x_var)), funs(round(., 2))) %>% kable()
+}
+
+lm_contrast_x <- function(lm_emmeans = lm_emmeans, model = model, data_d = data_d, y_var_d = y_var_d) {
+  
+  cohend <- data_d %>% filter(rowname == y_var_d)
+  
+  lm_simple_eff <- lm_emmeans %>% pairs
+  
+  original_model <- summary(model)
+
+list <- list("cohend" = cohend, "lm_simple_eff" = lm_simple_eff, "original_model" = original_model)
+
+return(list)
+}
+
+lm_emmeans_contrast_x <- function(model = model, x_var_ct = x_var_ct){
+  emmeans(model, x_var_ct) %>% pairs
+}
+
+lm_sum_stats_x_group <- function(model = model, 
+                                 x_var_ct = x_var_ct, 
+                                 group_var_ct = group_var_ct, group_var = group_var, group_levels = group_levels) {
+    group_var <- enquo(group_var)
+
+    emmeans(model, x_var_ct, by = group_var_ct) %>% 
+    as.tibble() %>% 
+    mutate(!!quo_name(group_var) := factor(!!group_var, levels = group_levels))
+}
+
+lm_kable_x_group <- function(data = data, x_var = x_var, group_var = group_var){
+  x_var <- enquo(x_var)
+  group_var <- enquo(group_var)
+  
+    data %>% mutate_at(vars(-c(!!x_var, !!group_var)), funs(round(., 2))) %>% kable()
+}
+
+lm_contrast_x_group <- function(model = model, 
+                                    x_var_ct = x_var_ct, 
+                                    group_var_ct = group_var_ct,
+                                   data_d = data_d, y_var_d = y_var_d){
+  y_var_d <- enquo(y_var_d)
+  
+  contrast <- emmeans(model, x_var_ct, by = group_var_ct) %>% pairs
+  
+  cohend <- data_d %>% select(!!y_var_d) # cohen's d
+  
+  list <- list("contrast" = contrast, "cohend" = cohend)
+  
+  return(list)
+}
+
+lm_contrasts_x_group <- function(model = model, 
+                                 x_var_ct = x_var_ct, 
+                                 group_var_ct = group_var_ct,
+                                 data_d = data_d, data_d2 = data_d2, y_var_d1 = y_var_d1){
+  y_var_d1 <- enquo(y_var_d1)
+  
+  contrasts_x <- lm_contrast_x_group(model = model, 
+                                     x_var_ct = group_var_ct, 
+                                     group_var_ct = x_var_ct,
+                                     data_d = data_d, y_var_d = !!y_var_d1)
+  
+  contrasts_group <- lm_contrast_x_group(model = model, 
+                                       x_var_ct = x_var_ct, 
+                                       group_var_ct = group_var_ct,
+                                       data_d = data_d2, y_var_d = !!y_var_d1)
+  
+  list <- list("contrasts_x" = contrasts_x, "contrasts_group" = contrasts_group)
+  
+  return(list)
+}
+
+lm_interaction <- function(emmeans = emmeans) {
+contrast(emmeans, interaction = c("poly", "consec"), by = NULL)
+}
+
+lm_emmeans_x_group <- function(model = model, 
+                               x_var_ct = x_var_ct, 
+                               group_var_ct = group_var_ct) {
+  
+    emmeans(model, x_var_ct, by = group_var_ct)
+}
+```
+
+```{r custom functions to transform log reg and neg bin coefficients}
+##Getting SEs for odds ratios when computing odds ratios from glm output.
+oddsratio.se <- function(model) {
+  broom::tidy(model) %>% 
+    mutate(or = exp(estimate),
+           var.diag = diag(vcov(model)),
+           or.se = sqrt(or^2 * var.diag)) %>%
+    select(or.se) %>% unlist %>% unname
+}
+
+#Transforming logistic regression coefficients to odds ratios.
+coef.or <- function(model) {
+  
+coef_exp <- exp(coef(model))
+or_se <- oddsratio.se(model)
+or_confint <- exp(confint(model))
+
+model_z <- coef(summary(model))[, 3]
+model_p <- coef(summary(model))[, 4]
+oddsratio_est <- cbind(coef_exp, or_se, model_z, model_p, or_confint)
+colnames(oddsratio_est) <- c("Odds Ratio", "SE", "z.score", "p.value", "LL 2.5%", "UL 97.5%")
+
+oddsratio_est %>% 
+  as.data.frame() %>% 
+  rownames_to_column() %>% 
+  mutate_at(vars(-rowname), funs(round(., 2)))
+}
+
+#Transforming negative binomial coefficients to incidence rate ratios.
+coef.irr <- function(model) {
+  
+coef_exp <- exp(coef(model))
+model_se <- coef(summary(model))[, 2]
+irr_se <- coef_exp*model_se
+irr_confint <- exp(confint(model))
+
+model_z <- coef(summary(model))[, 3]
+model_p <- coef(summary(model))[, 4]
+ratio_est <- cbind(coef_exp, irr_se, model_z, model_p, irr_confint)
+colnames(ratio_est) <- c("IRR (Ratio)", "SE", "z.score", "p.value", "LL 2.5%", "UL 97.5%")
+
+ratio_est %>% 
+  as.data.frame() %>% 
+  rownames_to_column() %>% 
+  mutate_at(vars(-rowname), funs(round(., 2)))
+}
+
+# Custom functions to compare one group with logistic regressions
+## contrasts and summary of the model comparing one group
+contrast_logreg_x <- function(model = model, x_var_ct = x_var_ct) {
+  #This is the exponentiated version of a log odds output given with normal emmeans(). 
+  treat_eff <- pairs(emmeans(model, x_var_ct, type = "response")) 
+  
+  # Transforming main output to odds ratios
+original_model <- summary(model)
+odds_ratio_model <- coef.or(model) # use original model summary for z-scores and p-value
+
+list <- list("treat_eff" = treat_eff, "original_model" = original_model, "odds_ratio_model" = odds_ratio_model)
+
+return(list)
+}
+
+## predicted data of the model comparing one group
+predicted_data_model_x_y <- function(model = model, 
+           data = data, x_var = x_var, y_var = y_var) {
+  x_var <- enquo(x_var)
+  y_var <- enquo(y_var)
+
+# Predicting data from the model
+  data %>% 
+  filter(!is.na(!!y_var) & !is.na(!!x_var)) %>%
+  mutate(predicted.pct := predict(model, type = "response")) %>% 
+  group_by(!!x_var) %>% 
+  summarise(predicted.pct := mean(predicted.pct, na.rm = T)) %>% 
+  ungroup()
+}
+
+## plot of the model comparing one group
+plot_bar_x_y_pct <- function(data = data, x_var = x_var, x_labels = x_labels, x_color = x_color,
+                               y_var = y_var, labs_y = labs_y,
+                               scale = scale, coord_cartesian = coord_cartesian, mean_round = mean_round) {
+x_var <- enquo(x_var)
+y_var <- enquo(y_var)
+
+data %>%
+  ggplot(aes(x = !!x_var, y = !!y_var, fill = !!x_var, group = !!x_var)) +
+  geom_bar(position = pd1, stat = "identity") + theme1 + theme + guides_no + mean_round +
+  coord_cartesian + scale + # this is where you change the scale
+  x_labels + x_color + labs_y
+}
+
+# Custom functions to compare two groups with logistic regressions
+## Return all contrasts and model outputs
+contrast_logreg_x_group <- function(model = model, x_var_ct = x_var_ct, group_var_ct = group_var_ct) {
+  #This is the exponentiated version of a log odds output given with normal emmeans(). 
+  ineq_ctl <- pairs(emmeans(model, group_var_ct, by = x_var_ct, type = "response")) 
+  treat_eff <- pairs(emmeans(model, x_var_ct, by = group_var_ct, type = "response")) 
+  
+  # Transforming main output to odds ratios
+original_model <- summary(model)
+odds_ratio_model <- coef.or(model) # use original model summary for z-scores and p-value
+
+list <- list("ineq_ctl" = ineq_ctl, "treat_eff" = treat_eff, "original_model" = original_model, "odds_ratio_model" = odds_ratio_model)
+
+return(list)
+}
+
+## Predict data based on model
+predicted_data_model_x_y_group <- 
+  function(model = model, 
+           data = data, x_var = x_var, y_var = y_var, 
+           group_var = group_var, group_levels = group_levels) {
+  x_var <- enquo(x_var)
+  y_var <- enquo(y_var)
+  group_var <- enquo(group_var)
+
+# Predicting data from the model
+d.pred <- 
+  data %>% 
+  filter(!is.na(!!y_var) & !is.na(!!x_var)) %>%
+  mutate(predicted.pct := predict(model, type = "response")) %>% 
+  group_by(!!x_var, !!group_var) %>% 
+  summarise(predicted.pct := mean(predicted.pct, na.rm = T)) %>% 
+  ungroup()
+
+d.pred %<>% mutate(!!quo_name(group_var) := factor(!!group_var, levels = group_levels))
+  }
+
+## plot of the model comparing two groups
+plot_bar_x_y_group_pct <- function(data = data, x_var = x_var, x_labels = x_labels, x_color = x_color,
+                               y_var = y_var, labs_y = labs_y,
+                               group_var = group_var, group_names = group_names,
+                               scale = scale, coord_cartesian = coord_cartesian, mean_round = mean_round) {
+x_var <- enquo(x_var)
+y_var <- enquo(y_var)
+group_var <- enquo(group_var)
+
+data %>%
+  ggplot(aes(x = !!x_var, y = !!y_var, fill = !!x_var, group = !!x_var)) +
+  geom_bar(position = pd1, stat = "identity") + theme1 + theme + guides_no + mean_round +
+  coord_cartesian + scale + # this is where you change the scale
+  facet_grid(, vars(!!group_var), labeller = as_labeller(group_names)) + # ignore warning, this is to make the plot facet the variables in the way that we want it
+  x_labels + x_color + labs_y
+}
+```
+
+```{r new logistic regression custom functions}
+# see here https://cran.r-project.org/web/packages/emmeans/vignettes/comparisons.html
+
+logreg_emprobs_x <- function(model = model, x_var_ct = x_var_ct){
+  emmeans(model, x_var_ct, type = "response")
+}
+
+logreg_emprobs_x_group <- function(model = model, x_var_ct = x_var_ct, group_var_ct = group_var_ct){
+  emmeans(model, x_var_ct, by = group_var_ct, type = "response")
+}
+
+logreg_emprobs_table_x <- function(emprobs = emprobs){
+# group_var <- enquo(group_var)
+
+    emprobs %>% 
+    as.tibble()
+    # mutate(!!quo_name(group_var) := factor(!!group_var, levels = group_levels))
+}
+
+logreg_emprobs_table_x_group <- function(emprobs = emprobs, group_var = group_var, group_levels = group_levels){
+group_var <- enquo(group_var)
+
+    emprobs %>% 
+    as.tibble() %>% 
+    mutate(!!quo_name(group_var) := factor(!!group_var, levels = group_levels))
+}
+
+# for one group
+logreg_oddsratio_x <- function(em.probs = em.probs){
+  em.probs %>% pairs()
+  # as.tibble()
+  # summarise(odds_ratio_THIS = (first(prob)/(1-first(prob)))/(last(prob)/(1-last(prob)))) %>% 
+  # bind_cols(em.probs %>% 
+  #             pairs(
+  #               # reverse = TRUE
+  #               ) %>%
+  #             as.tibble())
+}
+
+# for two groups
+logreg_oddsratio <- function(em.probs = em.probs, group_var = group_var, group_var_ct = group_var_ct){
+  group_var <- enquo(group_var)
+  
+  em.probs %>% pairs()
+  # as.tibble() %>% 
+  # group_by(!!group_var) %>% 
+  # summarise(odds_ratio_THIS = (first(prob)/(1-first(prob)))/(last(prob)/(1-last(prob)))) %>% 
+  # ungroup() %>% 
+  # left_join(em.probs %>% 
+  #             pairs(
+  #               # reverse = TRUE
+  #               ) %>%
+  #             as.tibble(), by = group_var_ct)
+}
+
+contrast_logreg_x <- function(model = model, x_var_ct = x_var_ct) {
+  
+  #This is the exponentiated version of a log odds output given with normal emmeans(). 
+  em.probs1 <- logreg_emprobs_x(model = model, x_var_ct = x_var_ct)
+  
+  # Transforming main output to odds ratios
+  original_model <- summary(model)
+  # odds_ratio_model <- coef.or(model) # use original model summary for z-scores and p-value
+  
+  odds.ratio1 <- logreg_oddsratio_x(em.probs = em.probs1)
+
+list <- list("Original Model" = original_model, "Treatment Effect" = odds.ratio1
+             # "Odds Ratio Model" = odds_ratio_model
+            )
+
+return(list)
+}
+
+contrast_logreg_x_group <- function(model = model, x_var = x_var, x_var_ct = x_var_ct, group_var = group_var, group_var_ct = group_var_ct) {
+  
+  x_var <- enquo(x_var)
+  group_var <- enquo(group_var)
+  
+  #This is the exponentiated version of a log odds output given with normal emmeans(). 
+  em.probs1 <- logreg_emprobs_x_group(model = model, x_var_ct = x_var_ct, group_var_ct = group_var_ct)
+  em.probs2 <- logreg_emprobs_x_group(model = model, x_var_ct = group_var_ct, group_var_ct = x_var_ct)
+
+  odds.ratio1 <- logreg_oddsratio(em.probs = em.probs1, group_var = !!group_var, group_var_ct = group_var_ct)
+  odds.ratio2 <- logreg_oddsratio(em.probs = em.probs2, group_var = !!x_var, group_var_ct = x_var_ct)
+  
+  # Transforming main output to odds ratios
+  original_model <- summary(model)
+  
+  odds_ratio_model <- coef.or(model) # use original model summary for z-scores and p-value
+  
+  main_eff1 <- contrast_logreg_x(model = model, x_var_ct = x_var_ct)$`Treatment Effect`
+  main_eff2 <- contrast_logreg_x(model = model, x_var_ct = group_var_ct)$`Treatment Effect`
+
+list <- list("Control Inequality" = odds.ratio2, "Treatment Effect by Group" = odds.ratio1, "Original Model" = original_model, "Main Effect 1 (Odds ratio)" = main_eff1, "Main Effect 2 (Odds ratio)" = main_eff2, "Odds Ratio Model" = odds_ratio_model)
+
+return(list)
+}
+
+plot_bar_x_y_group_pct <- function(data = data, x_var = x_var, x_labels = x_labels, x_color = x_color,
+                               y_var = y_var, labs_y = labs_y,
+                               group_var = group_var, group_names = group_names,
+                               scale = scale, coord_cartesian = coord_cartesian, mean_round = mean_round) {
+x_var <- enquo(x_var)
+y_var <- enquo(y_var)
+group_var <- enquo(group_var)
+
+data %>%
+  ggplot(aes(x = !!x_var, y = !!y_var, fill = !!x_var, group = !!x_var)) +
+  geom_bar(position = pd1, stat = "identity") + theme1 + theme + guides_no + mean_round +
+  coord_cartesian + scale + # this is where you change the scale
+  facet_grid(, vars(!!group_var), labeller = as_labeller(group_names)) + # ignore warning, this is to make the plot facet the variables in the way that we want it
+  x_labels + x_color + labs_y
+}
+
+# logreg_interaction <- function(emprobs = emprobs) {
+#  contrast(emprobs, interaction = c("poly", "consec"), by = NULL, type = "response")
+# }
+
+logreg_interaction <- function(emprobs = emprobs) {
+ contrast(emprobs, interaction = c("poly", "consec"), by = NULL) %>% 
+ as.tibble() %>%
+ mutate(odds.ratio = exp(estimate)) %>% 
+ mutate_at(vars(-c(cd_purp_sc_poly, gend_sc_consec)), funs(round(., digits = 2))) %>% 
+ kable()
+}
+```
+
+```{r}
+t4 <- d.an %>% select(t4belongcomp8:t4integration_CF_ASS_EI_Mentor)
+
+# d.an %>% filter(t4ResponseID != "")
+``` 
+
+# General Notes
+
+1.  When reviewing the Cohen's *d* by gender:
+    +    1 = Male
+    +    2 = Female
+    
+```{r}
+d.an %>% 
+  filter(!is.na(startedSYFUS)) %>% 
+  count(cd_purp_sc)
+
+d.an %>% 
+  filter(!is.na(belong_comp6)) %>% 
+  count(cd_purp_sc)
+```
+
+```{r}
+d.an.all <- d.an %>% filter(!is.na(cd_purp_sc))
+
+d.an %<>% 
+  filter(!is.na(cd_purp_sc) & startedSYFUS == 1)
+```
+
+```{r}
+vars_cont <- quos(t1preReasonsIndepcomp2, t1preReasonsInterdepcomp2, t1opportunty_independent_comp2, t1opportunty_interdependent_comp2, purpose_comp2, happy_comp4, belong_comp6, lifesat, happy_comp4, healthmosoverall_comp5, stressdaily, pss_comp4, overallmentalhealth_comp5_z, Y1_Sp_CumGPA, activism_z_comp2, activism_engaged, activism_hours_use_this, job_applylearning, honors_yes_use_this, perf_highexpect, perf_notsat_comp2, collexp_comp4, qualitiesind_comp2, qualitiesinter_comp4, potsuc_comp2, potential_use_this, success_use_this, mentor_yes)
+```
+
+# Effect sizes (All Ss who participanted in Pre-Matriculation Intv)
+
+### Differences between males and females for all conditions
+
+```{r}
+cohend_gend_all <- cohen.d(d.an.all %>% select(gend_num, !!!vars_cont), group = "gend_num", alpha = .05)
+
+cohend_gend_all <- cohend_gend_all$cohen.d
+
+cohend_gend_all %<>% as.data.frame() %>% rownames_to_column()
+
+cohend_gend_all
+```
+
+# Effect sizes (Only SYFUS)
+
+```{r}
+d.an %>% count(cd_purp, cd_purp_num) %>% select(-n)
+```
+
+## Is there a gender effect?
+
+### Differences between males and females for all conditions
+
+```{r}
+cohend_gend <- cohen.d(d.an %>% select(gend_num, !!!vars_cont), group = "gend_num", alpha = .05)
+
+cohend_gend <- cohend_gend$cohen.d
+
+cohend_gend %<>% as.data.frame() %>% rownames_to_column()
+
+cohend_gend
+```
+
+## Is there inequality?
+
+We want to focus on the effect sizes between males and females in the control group.
+
+### Inequalities between males and females in control
+
+Effect sizes (Cohen's *d*) between males and females in control:
+
+```{r}
+cohend_ineq <- cohen.d.by(x = d.an %>% select(cd_purp_num, gend_num, !!!vars_cont), group = "gend_num", group2 = "cd_purp_num", alpha = .05) %>% summary
+
+cohend_ineq %<>% 
+  rownames_to_column() %>% 
+  filter(rowname == "gend_numforcd_purp_num0") %>% 
+  select(-rowname) %>% 
+  round(., digits = 2)
+
+cohend_ineq
+```
+
+## Is there a treatment effect?
+
+### Differences between control and purpose for all students
+
+```{r}
+cohend_cd_purp_all <- cohen.d(d.an %>% select(cd_purp_num, !!!vars_cont), group = "cd_purp_num", alpha = .05)
+
+cohend_cd_purp_all <- cohend_cd_purp_all$cohen.d
+
+cohend_cd_purp_all %<>% as.data.frame() %>% rownames_to_column()
+
+cohend_cd_purp_all
+```
+
+### Differences between control and any cd_purpment for males and females
+
+Effect sizes (Cohen's *d*) between control and any cd_purpment for advantaged and disadvantaged students:
+
+```{r}
+d.an %>% count(gend, gend_num) %>% select(-n)
+
+cohend_cd_purp_gend <- cohen.d.by(x = d.an %>% select(cd_purp_num, gend_num, !!!vars_cont), group = "cd_purp_num", group2 = "gend_num", alpha = .05) %>% summary
+
+cohend_cd_purp_gend %<>% 
+  rownames_to_column() %>% 
+  mutate_at(vars(-c(rowname)), funs(round(., 2))) %>% 
+  mutate(gender = ifelse(rowname == "cd_purp_numforgend_num0", "male", "female"))
+  # filter(rowname == "cd_purp_numforgend_num1") %>% 
+  # select(-rowname) %>%
+  # round(., digits = 2)
+
+cohend_cd_purp_gend
+```
+
+
+
+## Is there a gender effect?
+```{r}
+cohend_gender <- cohen.d(x = d.an %>% select(gend_num, !!!vars_cont), group = "gend_num", alpha = .05)
+
+cohend_gender <- cohend_gender$cohen.d
+
+cohend_gender %<>% as.data.frame() %>% rownames_to_column()
+
+cohend_gender
+```
+
+
+# Descriptive tables
+## Overall
+
+```{r}
+d.an %>% 
+  filter(!is.na(cd_purp_sc)) %>% 
+  select(!!!vars_cont) %>% 
+  describe
+
+d.an %>% 
+  filter(!is.na(cd_purp_sc) & startedSYFUS == 1) %>% 
+  select(!!!vars_cont) %>% 
+  describe
+```
+
+## Purpose vs Control
+
+```{r}
+d.an.f <- d.an %>% filter(t1study_Numeric == 2) 
+d.an %>% select(!!!vars_cont) %>% describeBy(d.an$cd_purp)
+d.an.f %>% select(!!!vars_cont) %>% describeBy(d.an.f$cd_purp)
+```
+
+```{r}
+# d.an %>% select(!!!vars_cont) %>% describeBy(d.an$cd_purp2)
+# d.an.f %>% select(!!!vars_cont) %>% describeBy(d.an.f$cd_purp2)
+# d.an %>% select(!!!vars_cont) %>% describeBy(d.an %>% select(race, cd_purp2))
+```
+
+## By Purpose Condition and Gender
+
+```{r}
+d.an %>% select(!!!vars_cont) %>% describeBy(d.an %>% select(cd_purp, gend))
+```
+
+## By Disadvantaged Status
+```{r}
+d.an %>% select(!!!vars_cont) %>% describeBy(d.an$disadv)
+```
+
+## By Treatment and Disadvantaged Status
+```{r}
+d.an %>% select(!!!vars_cont) %>% describeBy(d.an %>% select(treat, disadv))
+```
+
+## By Each Condition and Disadvantaged Status
+```{r}
+d.an %>% select(!!!vars_cont) %>% describeBy(d.an %>% select(cond, disadv))
+```
+
+# Premeasures
+
+## Independent Reasons
+### By purpose condition
+
+**Analyses and plot without covariates:**
+```{r}
+model <- lm(t1preReasonsIndepcomp2 ~ cd_purp_sc, data = d.an)
+
+em.means <- lm_emmeans(model = model, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model, data_d = cohend_cd_purp_all, y_var_d = "t1preReasonsIndepcomp2")
+
+labs_y <- labs(x = "", y = "Independent Reasons")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+**Analyses and plot with covariates:**
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+em.means <- lm_emmeans(model = model2, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model2, data_d = cohend_cd_purp_all, y_var_d = "t1preReasonsIndepcomp2")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+**Analyses and plot without covariates:**
+```{r}
+model <- lm(t1preReasonsIndepcomp2 ~ cd_purp_sc * gend_sc, data = d.an)
+
+lm_contrasts_x_group(model = model, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = t1preReasonsIndepcomp2)
+
+sum_stats <- lm_sum_stats_x_group(model = model, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+**Analyses and plot with covariates:**
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+lm_contrasts_x_group(model = model2, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = t1preReasonsIndepcomp2)
+
+sum_stats <- lm_sum_stats_x_group(model = model2, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+## Interdependent Reasons
+### By purpose condition
+**Analyses and plot without covariates:**
+```{r}
+model <- lm(t1preReasonsInterdepcomp2 ~ cd_purp_sc, data = d.an)
+
+em.means <- lm_emmeans(model = model, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model, data_d = cohend_cd_purp_all, y_var_d = "t1preReasonsInterdepcomp2")
+
+labs_y <- labs(x = "", y = "Interdependent Reasons")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+**Analyses and plot with covariates:**
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+em.means <- lm_emmeans(model = model2, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model2, data_d = cohend_cd_purp_all, y_var_d = "t1preReasonsInterdepcomp2")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+### By purpose condition and gender (All Ss)
+
+**Analyses and plot without covariates:**
+```{r}
+model <- lm(t1preReasonsInterdepcomp2 ~ cd_purp_sc * gend_sc, data = d.an.all)
+
+lm_contrasts_x_group(model = model, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = t1preReasonsInterdepcomp2)
+
+sum_stats <- lm_sum_stats_x_group(model = model, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+**Analyses and plot with covariates:**
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+lm_contrasts_x_group(model = model2, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = t1preReasonsInterdepcomp2)
+
+sum_stats <- lm_sum_stats_x_group(model = model2, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+
+### By purpose condition and gender (Only Ss who started SYFUS)
+
+**Analyses and plot without covariates:**
+```{r}
+model <- lm(t1preReasonsInterdepcomp2 ~ cd_purp_sc * gend_sc, data = d.an)
+
+lm_contrasts_x_group(model = model, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = t1preReasonsInterdepcomp2)
+
+sum_stats <- lm_sum_stats_x_group(model = model, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+**Analyses and plot with covariates:**
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+lm_contrasts_x_group(model = model2, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = t1preReasonsInterdepcomp2)
+
+sum_stats <- lm_sum_stats_x_group(model = model2, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+# Pre-Matriculation DVs
+
+## % Pass Manipulation Check
+
+### Purpose vs Control
+**Plot and model without covariates:**
+```{r}
+model <- glm(t1manipcheck_binary_num ~ cd_purp_sc, data = d.an, family = binomial, na.action = na.omit)
+
+em.probs <- logreg_emprobs_x(model = model, x_var_ct = "cd_purp_sc")
+
+em.probs.table <- logreg_emprobs_table_x(emprobs = em.probs)
+em.probs.table
+
+contrast_logreg_x(model = model, x_var_ct = "cd_purp_sc")
+
+labs_y <- labs(x = "", y = "% Pass Manipulation Check")
+
+plot_bar_x_y_pct(data = em.probs.table, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = prob*100, labs_y = labs_y,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct)
+```
+
+**Plot and model with covariates:**
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+em.probs <- logreg_emprobs_x(model = model2, x_var_ct = "cd_purp_sc")
+
+em.probs.table <- logreg_emprobs_table_x(emprobs = em.probs)
+
+contrast_logreg_x(model = model2, x_var_ct = "cd_purp_sc")
+
+plot_bar_x_y_pct(data = em.probs.table, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = prob*100, labs_y = labs_y,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct)
+```
+
+### By purpose condition and gender
+
+**Plot and model without covariates:**
+```{r}
+model <- glm(t1manipcheck_binary_num ~ cd_purp_sc*gend_sc, data = d.an, family = binomial, na.action = na.omit)
+
+em.probs <- logreg_emprobs_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+
+em.probs.table <- logreg_emprobs_table_x_group(emprobs = em.probs, group_var = gend_sc, group_levels = group_levels_gend)
+
+em.probs.table
+
+contrast_logreg_x_group(model = model, x_var = cd_purp_sc, x_var_ct = "cd_purp_sc", 
+                            group_var = gend_sc, group_var_ct = "gend_sc")
+
+logreg_interaction(em.probs)
+
+plot_bar_x_y_group_pct(data = em.probs.table, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = prob*100, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct)
+```
+
+**Plot and model with covariates:**
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+em.probs <- logreg_emprobs_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+
+em.probs.table <- logreg_emprobs_table_x_group(emprobs = em.probs, group_var = gend_sc, group_levels = group_levels_gend)
+
+em.probs.table
+
+contrast_logreg_x_group(model = model2, x_var = cd_purp_sc, x_var_ct = "cd_purp_sc", 
+                            group_var = gend_sc, group_var_ct = "gend_sc")
+
+logreg_interaction(em.probs)
+
+plot_bar_x_y_group_pct(data = em.probs.table, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = prob*100, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct)
+```
+
+## Independent Opportunities
+### By purpose condition
+
+**Analyses and plot without covariates:**
+
+```{r}
+model <- lm(t1opportunty_independent_comp2 ~ cd_purp_sc, data = d.an)
+
+em.means <- lm_emmeans(model = model, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model, data_d = cohend_cd_purp_all, y_var_d = "t1opportunty_independent_comp2")
+
+labs_y <- labs(x = "", y = "Independent Opportunities")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+**Analyses and plot with covariates:**
+
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+em.means <- lm_emmeans(model = model2, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model2, data_d = cohend_cd_purp_all, y_var_d = "t1opportunty_independent_comp2")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+**Analyses and plot without covariates:**
+
+```{r}
+model <- lm(t1opportunty_independent_comp2 ~ cd_purp_sc * gend_sc, data = d.an)
+
+lm_contrasts_x_group(model = model, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = t1opportunty_independent_comp2)
+
+sum_stats <- lm_sum_stats_x_group(model = model, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+**Analyses and plot with covariates:**
+
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+lm_contrasts_x_group(model = model2, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = t1opportunty_independent_comp2)
+
+sum_stats <- lm_sum_stats_x_group(model = model2, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+
+
+## Interdependent Opportunities
+### By purpose condition
+
+**Analyses and plot without covariates:**
+
+```{r}
+model <- lm(t1opportunty_interdependent_comp2 ~ cd_purp_sc, data = d.an)
+
+em.means <- lm_emmeans(model = model, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model, data_d = cohend_cd_purp_all, y_var_d = "t1opportunty_interdependent_comp2")
+
+labs_y <- labs(x = "", y = "Interdependent Opportunities")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+**Analyses and plot with covariates:**
+
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+em.means <- lm_emmeans(model = model2, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model2, data_d = cohend_cd_purp_all, y_var_d = "t1opportunty_interdependent_comp2")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+**Analyses and plot without covariates:**
+
+```{r}
+model <- lm(t1opportunty_interdependent_comp2 ~ cd_purp_sc * gend_sc, data = d.an)
+
+lm_contrasts_x_group(model = model, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = t1opportunty_interdependent_comp2)
+
+sum_stats <- lm_sum_stats_x_group(model = model, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+**Analyses and plot with covariates:**
+
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+lm_contrasts_x_group(model = model2, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = t1opportunty_interdependent_comp2)
+
+sum_stats <- lm_sum_stats_x_group(model = model2, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+# Belonging and College Experience
+
+## Belonging at College
+
+| Variable | Belonging at College |
+|:---------|:-----------------------------------------------------------------|
+| Items | 1.      I feel like I belong at Stanford. |
+|       | 2.      I fit in well at Stanford. | 
+|       | 3.      I feel like an outsider at Stanford. (reversed) | 
+|       | 4.      Other people understand more than I do about what is going on at Stanford. (reversed) | 
+|       | 5.      I am similar to the kind of people who succeed at Stanford. | 
+|       | 6.      It is a mystery to me how Stanford works. (reversed) | 
+| Scale | 1 = Strongly disagree ... 7 = Strongly agree| 
+
+### By purpose condition
+
+Plot without covariates:
+```{r}
+model <- lm(belong_comp6 ~ cd_purp_sc, data = d.an)
+
+sum_stats <- emmeans(model, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "belong_comp6")
+lm_emmeans(model = model, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Belonging at College"),
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+sum_stats <- emmeans(model2, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "belong_comp6")
+lm_emmeans(model = model2, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model2)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Belonging at College"),
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+Analyses and plot without covariates:
+```{r}
+model <- lm(belong_comp6 ~ cd_purp_sc * gend_sc, data = d.an)
+
+# is there inequality?
+emmeans(model, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(belong_comp6) %>% rename(purpose_d_ineq_ctl = belong_comp6) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, belong_comp6) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Belonging at College"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+# is there inequality?
+emmeans(model2, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(belong_comp6) %>% rename(d_ineq_ctl = belong_comp6) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model2, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, belong_comp6) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Belonging at College"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+## Apply Learning at Job
+
+| Apply Learning at Job | |
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Strongly disagree ... 7 = Strongly agree |
+| Item  | 1.      Since I started at Stanford, I have had an internship or job that allowed me to apply what I was learning in the classroom. |
+
+### By purpose condition
+
+Plot without covariates:
+```{r}
+labs_job_applylearning <- labs(x = "", y = "Apply Learning at Job")
+
+model <- lm(job_applylearning ~ cd_purp_sc, data = d.an)
+
+sum_stats <- emmeans(model, ~ cd_purp_sc) 
+
+sum_stats %<>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "job_applylearning")
+lm_emmeans(model = model, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+             x_color = color_cd_purp,
+             y_var = emmean, labs_y = labs_job_applylearning,
+             scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+sum_stats <- emmeans(model2, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "job_applylearning")
+lm_emmeans(model = model2, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model2)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+             x_color = color_cd_purp,
+             y_var = emmean, labs_y = labs_job_applylearning,
+             scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+Analyses and plot without covariates:
+```{r}
+model <- lm(job_applylearning ~ cd_purp_sc * gend_sc, data = d.an)
+
+# is there inequality?
+emmeans(model, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(job_applylearning) %>% rename(purpose_d_ineq_ctl = job_applylearning) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, job_applylearning) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_job_applylearning,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+# is there inequality?
+emmeans(model2, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(job_applylearning) %>% rename(d_ineq_ctl = job_applylearning) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model2, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+lm_interaction(emmeans = sum_stats)
+cohend_cd_purp_gend %>% select(gender, job_applylearning) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_job_applylearning,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+```{r eval=FALSE, include=FALSE}
+model <- lm(job_applylearning ~ cd_purp_sc * gend_sc, data = d.an)
+# model %>% summary
+
+emmeans(model, ~ cd_purp_sc | gend_sc) %>% pairs
+model <- lm(job_applylearning ~ cd_purp_sc, data = d.an %>% filter(gend_sc == "f"))
+model %>% summary
+```
+
+
+## % Honors
+### Purpose vs Control
+
+Plot and model without covariates:
+```{r}
+model <- glm(honors_yes_use_this ~ cd_purp_sc, data = d.an, family = binomial, na.action = na.omit)
+
+em.probs <- logreg_emprobs_x(model = model, x_var_ct = "cd_purp_sc")
+
+em.probs.table <- logreg_emprobs_table_x(emprobs = em.probs)
+em.probs.table
+
+contrast_logreg_x(model = model, x_var_ct = "cd_purp_sc")
+
+labs_y <- labs(x = "", y = "% Honors")
+
+plot_bar_x_y_pct(data = em.probs.table, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = prob*100, labs_y = labs_y,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct)
+```
+
+Plot and model with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+em.probs <- logreg_emprobs_x(model = model2, x_var_ct = "cd_purp_sc")
+
+em.probs.table <- logreg_emprobs_table_x(emprobs = em.probs)
+
+contrast_logreg_x(model = model2, x_var_ct = "cd_purp_sc")
+
+plot_bar_x_y_pct(data = em.probs.table, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = prob*100, labs_y = labs_y,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct)
+```
+
+
+### By purpose condition and gender
+
+Plot and model without covariates:
+```{r}
+model <- glm(honors_yes_use_this ~ cd_purp_sc*gend_sc, data = d.an, family = binomial, na.action = na.omit)
+
+em.probs <- logreg_emprobs_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+
+em.probs.table <- logreg_emprobs_table_x_group(emprobs = em.probs, group_var = gend_sc, group_levels = group_levels_gend)
+
+em.probs.table
+
+contrast_logreg_x_group(model = model, x_var = cd_purp_sc, x_var_ct = "cd_purp_sc", 
+                            group_var = gend_sc, group_var_ct = "gend_sc")
+
+logreg_interaction <- function(emprobs = emprobs) {
+ contrast(emprobs, interaction = c("poly", "consec"), by = NULL) %>% 
+ as.tibble() %>%
+ mutate(odds.ratio = exp(estimate)) %>% 
+ mutate_at(vars(-c(cd_purp_sc_poly, gend_sc_consec)), funs(round(., digits = 2))) %>% 
+ kable()
+}
+
+logreg_interaction(em.probs)
+
+plot_bar_x_y_group_pct(data = em.probs.table, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = prob*100, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct)
+```
+
+```{r}
+glm(honors_yes_use_this ~ cd_purp*gend, data = d.an, family = binomial, na.action = na.omit) %>% summary
+```
+
+```{r}
+0.21182*4
+```
+
+```{r}
+# http://www.cantab.net/users/filimon/cursoFCDEF/will/logistic_interact.pdf
+
+# β3 is the difference between the log-odds ratio comparing
+# males in treatment vs control and the log-odds ratio
+# comparing females in treatment vs control.
+
+# exp(0.21182)
+# exp(-0.08926 - 0.18137)
+
+# $`Treatment Effect by Group`
+# gend_sc = f:
+#  contrast   odds.ratio        SE  df z.ratio p.value
+#  purp / ctl   1.277778 0.5700576 Inf   0.549  0.5827
+# 
+# gend_sc = m:
+#  contrast   odds.ratio        SE  df z.ratio p.value
+#  purp / ctl   0.547619 0.2611752 Inf  -1.263  0.2067
+
+# exp(1.277778 - 0.547619)
+
+# $`Control Inequality`
+# cd_purp_sc = purp:
+#  contrast odds.ratio        SE  df z.ratio p.value
+#  f / m     2.1954545 1.0574854 Inf   1.633  0.1025
+# 
+# cd_purp_sc = ctl:
+#  contrast odds.ratio        SE  df z.ratio p.value
+#  f / m     0.9409091 0.4149488 Inf  -0.138  0.8902
+ 
+# exp(2.1954545 - 0.9409091)
+```
+
+Plot and model with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+em.probs <- logreg_emprobs_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+
+em.probs.table <- logreg_emprobs_table_x_group(emprobs = em.probs, group_var = gend_sc, group_levels = group_levels_gend)
+
+em.probs.table
+
+contrast_logreg_x_group(model = model2, x_var = cd_purp_sc, x_var_ct = "cd_purp_sc", 
+                            group_var = gend_sc, group_var_ct = "gend_sc")
+
+logreg_interaction(em.probs)
+
+plot_bar_x_y_group_pct(data = em.probs.table, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = prob*100, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct)
+```
+
+```{r}
+
+# (1.28*1.22)/0.91
+
+# ----------------------------------------------------------
+# source  |  coefficient  exp(coef)    type of exp(coef)
+# --------+-------------------------------------------------
+# f       |   2.996118    20.007716    odds ratio
+# h       |   2.390911    10.92345     odds ratio
+# f#h     |  -2.047755     0.1290242   ratio of odds ratios
+# cv1     |   0.196476     1.217106    odds ratio
+# _cons   | -11.86075      7.062e-06   baseline odds
+# ---------------------------------------------------------
+  
+# odds ratio h1/h0 for f=0:  b[1.h]                            = 10.92345  
+# odds ratio h1/h0 for f=1:  b[1.h]*b[f#h] = 10.92345*.1290242 = 1.4093894
+  
+# ratio of odds ratios: (3.677847/2.609533)/(1.424706/.1304264) = .1290242
+
+# 1.4093889/10.923446
+
+```
+
+## Positive Evaluation of College
+### By purpose condition
+
+Plot without covariates:
+
+**Updated code:**
+```{r}
+model <- lm(collexp_comp4 ~ cd_purp_sc, data = d.an)
+
+em.means <- lm_emmeans(model = model, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model, data_d = cohend_cd_purp_all, y_var_d = "collexp_comp4")
+
+labs_y <- labs(x = "", y = "Positive Evaluation of College")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+```{r eval=FALSE, include=FALSE}
+model <- lm(collexp_comp4 ~ cd_purp_sc, data = d.an)
+
+sum_stats <- lm_sum_stats_x(model = model, x_var_ct = "cd_purp_sc")
+lm_kable_x(data = sum_stats, x_var = cd_purp_sc)
+lm_contrast_x(model = model, data_d = cohend_cd_purp_all, y_var_d = "collexp_comp4")
+
+labs_y <- labs(x = "", y = "Positive Evaluation of College")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+```{r eval=FALSE, include=FALSE}
+model <- lm(collexp_comp4 ~ cd_purp_sc, data = d.an)
+
+sum_stats <- emmeans(model, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "collexp_comp4")
+summary(model)
+
+labs_y <- labs(x = "", y = "Positive Evaluation of College")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+em.means <- lm_emmeans(model = model2, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model2, data_d = cohend_cd_purp_all, y_var_d = "collexp_comp4")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+Analyses and plot without covariates:
+
+```{r}
+model <- lm(collexp_comp4 ~ cd_purp_sc * gend_sc, data = d.an)
+
+lm_contrasts_x_group(model = model, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = collexp_comp4)
+
+sum_stats <- lm_sum_stats_x_group(model = model, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+
+```{r emmeans pairwise comparisons}
+# emmeans(model, list(pairwise ~ cd_purp_sc | gend_sc, pairwise ~ gend_sc | cd_purp_sc))
+```
+
+```{r}
+# model <- lm(collexp_comp4 ~ cd_purp_sc * gend_sc, data = d.an)
+# 
+# # is there inequality?
+# emmeans(model, ~ gend_sc | cd_purp_sc) %>% pairs 
+# cohend_ineq %>% select(collexp_comp4) %>% rename(purpose_d_ineq_ctl = collexp_comp4) # cohen's d
+# 
+# # is there a treatment effect?
+# sum_stats <- emmeans(model, ~ cd_purp_sc | gend_sc) 
+# pairs(sum_stats) 
+# cohend_cd_purp_gend %>% select(gender, collexp_comp4) # cohen's d
+# sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+# sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+# 
+# 
+# summary(model)
+# 
+# plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+#                    x_color = color_cd_purp,
+#                    y_var = emmean, labs_y = labs_y,
+#                    group_var = gend_sc, group_names = gend_names,
+#                    scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+Plot with covariates:
+
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+lm_contrasts_x_group(model = model2, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = collexp_comp4)
+
+sum_stats <- lm_sum_stats_x_group(model = model2, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+## Independence Valued at College
+### By purpose condition
+
+Analyses and plot without covariates:
+
+```{r}
+model <- lm(qualitiesind_comp2 ~ cd_purp_sc, data = d.an)
+
+# sum_stats <- lm_sum_stats_x(model = model, x_var_ct = "cd_purp_sc")
+# lm_kable_x(data = sum_stats, x_var = cd_purp_sc)
+# lm_contrast_x(model = model, data_d = cohend_cd_purp_all, y_var_d = "qualitiesind_comp2")
+
+em.means <- lm_emmeans(model = model, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model, data_d = cohend_cd_purp_all, y_var_d = "qualitiesind_comp2")
+
+labs_y <- labs(x = "", y = "Independence Valued at College")
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+Analyses and plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+# sum_stats <- lm_sum_stats_x(model = model2, x_var_ct = "cd_purp_sc")
+# lm_kable_x(data = sum_stats, x_var = cd_purp_sc)
+# lm_contrast_x(model = model2, data_d = cohend_cd_purp_all, y_var_d = "qualitiesind_comp2")
+
+em.means <- lm_emmeans(model = model2, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model2, data_d = cohend_cd_purp_all, y_var_d = "qualitiesind_comp2")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+Analyses and plot without covariates:
+
+```{r}
+model <- lm(qualitiesind_comp2 ~ cd_purp_sc * gend_sc, data = d.an)
+
+lm_contrasts_x_group(model = model, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = qualitiesind_comp2)
+
+sum_stats <- lm_sum_stats_x_group(model = model, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+Analyses and plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+lm_contrasts_x_group(model = model2, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = qualitiesind_comp2)
+
+sum_stats <- lm_sum_stats_x_group(model = model2, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+## Interdependence Valued at College
+### By purpose condition
+
+Analyses and plot without covariates:
+
+```{r}
+model <- lm(qualitiesinter_comp4 ~ cd_purp_sc, data = d.an)
+
+# sum_stats <- lm_sum_stats_x(model = model, x_var_ct = "cd_purp_sc")
+# lm_kable_x(data = sum_stats, x_var = cd_purp_sc)
+# lm_contrast_x(model = model, data_d = cohend_cd_purp_all, y_var_d = "qualitiesinter_comp4")
+
+em.means <- lm_emmeans(model = model, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model, data_d = cohend_cd_purp_all, y_var_d = "qualitiesinter_comp4")
+
+labs_y <- labs(x = "", y = "Interdependence Valued at College")
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+Analyses and plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+# sum_stats <- lm_sum_stats_x(model = model2, x_var_ct = "cd_purp_sc")
+# lm_kable_x(data = sum_stats, x_var = cd_purp_sc)
+# lm_contrast_x(model = model2, data_d = cohend_cd_purp_all, y_var_d = "qualitiesinter_comp4")
+
+em.means <- lm_emmeans(model = model2, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model2, data_d = cohend_cd_purp_all, y_var_d = "qualitiesinter_comp4")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+Analyses and plot without covariates:
+
+```{r}
+model <- lm(qualitiesinter_comp4 ~ cd_purp_sc * gend_sc, data = d.an)
+
+lm_contrasts_x_group(model = model, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = qualitiesinter_comp4)
+
+sum_stats <- lm_sum_stats_x_group(model = model, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+Analyses and plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+lm_contrasts_x_group(model = model2, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = qualitiesinter_comp4)
+
+sum_stats <- lm_sum_stats_x_group(model = model2, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+## Relative Potential and Success to Other Ss
+
+### By purpose condition
+
+Analyses and plot without covariates:
+
+```{r}
+model <- lm(potsuc_comp2 ~ cd_purp_sc, data = d.an)
+
+# sum_stats <- lm_sum_stats_x(model = model, x_var_ct = "cd_purp_sc")
+# lm_kable_x(data = sum_stats, x_var = cd_purp_sc)
+# lm_contrast_x(model = model, data_d = cohend_cd_purp_all, y_var_d = "potsuc_comp2")
+
+em.means <- lm_emmeans(model = model, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model, data_d = cohend_cd_purp_all, y_var_d = "potsuc_comp2")
+
+labs_y <- labs(x = "", y = "Relative Potential and Success to Other Ss")
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_10, coord_cartesian = coord_cartesian_10, mean_round = mean_round3)
+```
+
+Analyses and plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+# sum_stats <- lm_sum_stats_x(model = model2, x_var_ct = "cd_purp_sc")
+# lm_kable_x(data = sum_stats, x_var = cd_purp_sc)
+# lm_contrast_x(model = model2, data_d = cohend_cd_purp_all, y_var_d = "potsuc_comp2")
+
+em.means <- lm_emmeans(model = model2, x_var_ct = "cd_purp_sc")
+sum_stats <- em.means %>% as.tibble()
+lm_kable_x(lm_emmeans = em.means, x_var = cd_purp_sc)
+
+lm_contrast_x(lm_emmeans = em.means, model = model2, data_d = cohend_cd_purp_all, y_var_d = "potsuc_comp2")
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   scale = scale_y_10, coord_cartesian = coord_cartesian_10, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+Analyses and plot without covariates:
+
+```{r}
+model <- lm(potsuc_comp2 ~ cd_purp_sc * gend_sc, data = d.an)
+
+lm_contrasts_x_group(model = model, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = potsuc_comp2)
+
+sum_stats <- lm_sum_stats_x_group(model = model, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_10, coord_cartesian = coord_cartesian_10, mean_round = mean_round3)
+```
+
+Analyses and plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+lm_contrasts_x_group(model = model2, 
+                    x_var_ct = "cd_purp_sc", 
+                    group_var_ct = "gend_sc",
+                    data_d = cohend_ineq, data_d2 = cohend_cd_purp_gend, y_var_d = potsuc_comp2)
+
+sum_stats <- lm_sum_stats_x_group(model = model2, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+lm_kable_x_group(data = sum_stats, x_var = cd_purp_sc, group_var = gend_sc)
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_10, coord_cartesian = coord_cartesian_10, mean_round = mean_round3)
+```
+
+
+## % Has a Mentor
+### Purpose vs Control
+
+Plot and model without covariates:
+```{r}
+model <- glm(mentor_yes ~ cd_purp_sc, data = d.an, family = binomial, na.action = na.omit)
+
+em.probs <- logreg_emprobs_x(model = model, x_var_ct = "cd_purp_sc")
+
+em.probs.table <- logreg_emprobs_table_x(emprobs = em.probs)
+em.probs.table
+
+contrast_logreg_x(model = model, x_var_ct = "cd_purp_sc")
+
+labs_y <- labs(x = "", y = "% Has a Mentor")
+
+plot_bar_x_y_pct(data = em.probs.table, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = prob*100, labs_y = labs_y,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct)
+```
+
+Plot and model with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+em.probs <- logreg_emprobs_x(model = model2, x_var_ct = "cd_purp_sc")
+
+em.probs.table <- logreg_emprobs_table_x(emprobs = em.probs)
+
+contrast_logreg_x(model = model2, x_var_ct = "cd_purp_sc")
+
+plot_bar_x_y_pct(data = em.probs.table, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = prob*100, labs_y = labs_y,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct)
+```
+
+```{r eval=FALSE, include=FALSE}
+model <- glm(mentor_yes ~ cd_purp_sc, data = d.an, family = binomial, na.action = na.omit)
+
+contrast_logreg_x(model = model, x_var_ct = "cd_purp_sc")
+
+d.pred <- predicted_data_model_x_y(model = model, 
+    data = d.an, x_var = cd_purp_sc, y_var = mentor_yes)
+
+labs_y <- labs(x = "", y = "% Has a Mentor")
+
+plot_bar_x_y_pct(data = d.pred, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = predicted.pct*100, labs_y = labs_y,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct)
+```
+
+```{r eval=FALSE, include=FALSE}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+contrast_logreg_x(model = model2, x_var_ct = "cd_purp_sc")
+```
+### By purpose condition and gender
+
+Plot and model without covariates:
+```{r}
+model <- glm(mentor_yes ~ cd_purp_sc*gend_sc, data = d.an, family = binomial, na.action = na.omit)
+
+em.probs <- logreg_emprobs_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+
+em.probs.table <- logreg_emprobs_table_x_group(emprobs = em.probs, group_var = gend_sc, group_levels = group_levels_gend)
+
+em.probs.table
+
+contrast_logreg_x_group(model = model, x_var = cd_purp_sc, x_var_ct = "cd_purp_sc", 
+                            group_var = gend_sc, group_var_ct = "gend_sc")
+
+# emmeans(model, pairwise ~ cd_purp_sc | gend_sc, type = "response")
+# emmip(model, cd_purp_sc ~ gend_sc, type = "response")
+
+plot_bar_x_y_group_pct(data = em.probs.table, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = prob*100, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct)
+```
+
+Plot and model with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+em.probs <- logreg_emprobs_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+
+em.probs.table <- logreg_emprobs_table_x_group(emprobs = em.probs, group_var = gend_sc, group_levels = group_levels_gend)
+
+em.probs.table
+
+contrast_logreg_x_group(model = model2, x_var = cd_purp_sc, x_var_ct = "cd_purp_sc", 
+                            group_var = gend_sc, group_var_ct = "gend_sc")
+
+plot_bar_x_y_group_pct(data = em.probs.table, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = prob*100, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct)
+```
+
+```{r eval=FALSE, include=FALSE}
+model <- glm(mentor_yes ~ cd_purp_sc*gend_sc, data = d.an, family = binomial, na.action = na.omit)
+
+contrast_logreg_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+
+d.pred <- 
+  predicted_data_model_x_y_group(
+    model = model, 
+    data = d.an, x_var = cd_purp_sc, y_var = mentor_yes, 
+    group_var = gend_sc, group_levels = group_levels_gend)
+
+plot_bar_x_y_group_pct(data = d.pred, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = predicted.pct*100, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct)
+```
+
+```{r eval=FALSE, include=FALSE}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+contrast_logreg_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+```
+
+```{r eval=FALSE, include=FALSE}
+model <- glm(mentor_yes ~ cd_purp_sc*gend_sc, data = d.an, family = binomial, na.action = na.omit)
+
+emmeans(model, "cd_purp_sc", by = "gend_sc", type = "response")
+emmeans(model, "cd_purp_sc", by = "gend_sc", type = "response") %>% pairs
+
+model %>% summary
+
+emmeans(model,  "gend_sc", by = "cd_purp_sc", type = "response")
+emmeans(model,  "gend_sc", by = "cd_purp_sc", type = "response") %>% pairs
+
+# emmeans(model, ~ cd_purp_sc | gend_sc, type = "response")
+
+# emmip(model, ~ cd_purp_sc | gend_sc, type = "response")
+
+glm_lr_sum_stats_x_group <- function(model = model, 
+                                 x_var_ct = x_var_ct, 
+                                 group_var_ct = group_var_ct, group_var = group_var, group_levels = group_levels) {
+    group_var <- enquo(group_var)
+
+    emmeans(model, x_var_ct, by = group_var_ct, type = "response") %>% 
+    as.tibble() %>% 
+    mutate(!!quo_name(group_var) := factor(!!group_var, levels = group_levels))
+}
+
+sum_stats <- glm_lr_sum_stats_x_group(model = model, 
+                     x_var_ct = "cd_purp_sc", 
+                     group_var_ct = "gend_sc", group_var = gend_sc, group_levels = group_levels_gend)
+
+
+plot_bar_x_y_group_pct <- function(data = data, x_var = x_var, x_labels = x_labels, x_color = x_color,
+                               y_var = y_var, labs_y = labs_y,
+                               group_var = group_var, group_names = group_names,
+                               scale = scale, coord_cartesian = coord_cartesian, mean_round = mean_round) {
+x_var <- enquo(x_var)
+y_var <- enquo(y_var)
+group_var <- enquo(group_var)
+
+data %>%
+  ggplot(aes(x = !!x_var, y = !!y_var, fill = !!x_var, group = !!x_var)) +
+  geom_bar(position = pd1, stat = "identity") + theme1 + theme + guides_no + mean_round +
+  coord_cartesian + scale + # this is where you change the scale
+  facet_grid(, vars(!!group_var), labeller = as_labeller(group_names)) + # ignore warning, this is to make the plot facet the variables in the way that we want it
+  x_labels + x_color + labs_y
+}
+
+mean_round_pct2 <- geom_text(aes(label = paste0(format(prob*100, digits = 3), "%"), y = 5))
+  
+plot_bar_x_y_group_pct(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = prob*100, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_100, coord_cartesian = coord_cartesian_100, mean_round = mean_round_pct2)
+
+pairs(emmeans(model, "cd_purp_sc", by = "gend_sc", type = "response")) 
+```
+
+```{r eval=FALSE, include=FALSE}
+model <- glm(mentor_yes ~ cd_purp_sc2*gend_sc2, data = d.an, family = binomial, na.action = na.omit)
+
+emmeans(model, "cd_purp_sc2", by = "gend_sc2", type = "response")
+emmeans(model, "cd_purp_sc2", by = "gend_sc2", type = "response") %>% pairs
+
+model %>% summary
+
+model <- glm(mentor_yes ~ cd_purp_sc2*gend_sc2 + sattoact + hsrank, data = d.an, family = binomial, na.action = na.omit)
+
+emmeans(model, "cd_purp_sc2", by = "gend_sc2", type = "response")
+emmeans(model, "cd_purp_sc2", by = "gend_sc2", type = "response") %>% pairs
+
+model %>% summary
+
+# d.an %>% filter(!is.na(cd_purp_sc)) %>% select(cd_purp, cd_purp_sc, gend, gend_sc) %>% str
+
+# d.an %>% count(cd_purp, cd_purp_sc)
+```
+
+```{r eval=FALSE, include=FALSE}
+model <- glm(mentor_yes ~ cd_purp_sc*gend_sc, data = d.an, family = binomial, na.action = na.omit)
+
+em.probs <- logreg_emprobs(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+
+# odds.ratio1 <- logreg_oddsratio(em.probs = em.probs1, group_var = gend_sc, group_var_ct = "gend_sc")
+# odds.ratio2 <- logreg_oddsratio(em.probs = em.probs2, group_var = cd_purp_sc, group_var_ct = "cd_purp_sc")
+
+# contrast_logreg_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+
+contrast_logreg_x_group(model = model, x_var = cd_purp_sc, x_var_ct = "cd_purp_sc", group_var = gend_sc, group_var_ct = "gend_sc")
+
+model <- glm(mentor_yes ~ cd_purp_sc2*gend_sc2 + sattoact + hsrank, data = d.an, family = binomial, na.action = na.omit)
+
+emprobs <- emmeans(model, "cd_purp_sc2", by = "gend_sc2", type = "response")
+
+emprobs
+
+emprobs %>% 
+  as.tibble() %>% 
+  group_by(gend_sc2) %>% 
+  summarise(odds_ratio_THIS = first(prob)/last(prob)) %>% 
+  ungroup() %>% 
+  left_join(emprobs %>% pairs %>% as.tibble(), by = "gend_sc2")
+
+contrast_logreg_x_group(model = model, x_var_ct = "cd_purp_sc2", group_var_ct = "gend_sc2")
+
+
+```
+
+```{r eval=FALSE, include=FALSE}
+model <- glm(mentor_yes ~ cd_purp*gend, data = d.an, family = binomial, na.action = na.omit)
+
+emmeans(model, "cd_purp", by = "gend", type = "response")
+emmeans(model, "cd_purp", by = "gend", type = "response") %>% pairs
+
+# emmeans(model, "gend", by = "cd_purp", type = "response") %>% pairs
+
+# model %>% summary
+```
+
+```{r eval=FALSE, include=FALSE}
+model <- glm(mentor_yes ~ cd_purp*gend + sattoact + hsrank, data = d.an, family = binomial, na.action = na.omit)
+
+emmeans(model, "cd_purp", by = "gend", type = "response")
+emmeans(model, "cd_purp", by = "gend", type = "response") %>% pairs
+
+model %>% summary
+```
+
+## # Extracurricular Acvitivites
+
+**Distribution of the data**
+
+```{r}
+sum_stats <- sum_stats_round_new2(data = d.an, factor1 = gend_sc, 
+                                  factor2 = cd_purp_sc, variable = org_total)
+
+sum_stats %>% kable
+
+labs_y <- labs(x = "", y = "# Extracurricular Acvitivites")
+
+plot_raincloud2 <- function(data, factor, variable, x_color, labs_y, labels_x, 
+                           scale, coord_cartesian, group_var, group_names, theme) {
+  ftr <- enquo(factor)
+  var <- enquo(variable)
+  group_var <- enquo(group_var)
+  
+  data %>% 
+    ggplot(aes_(y = var, x = ftr, fill = ftr)) +
+    raincloud_violin +
+    geom_point(aes_(y = var, color = ftr), 
+               position = position_jitter(width = .15), size = .5, alpha = 0.8) +
+    stat_summary_se + raincloud_boxplot + raincloud_guides + raincloud_theme_light + raincloud_theme +
+    x_color + labs_y + labels_x + theme1 + theme +
+    scale + coord_cartesian +
+    facet_grid(, vars(!!group_var), labeller = as_labeller(group_names)) # ignore warning, this is to make the plot facet the variables in the way that we want it
+}
+
+plot_raincloud2(data = d.an, factor = cd_purp_sc, 
+               variable = org_total, 
+               x_color = color_cd_purp, labs_y = labs_y,
+               labels_x = labels_cd_purp,
+               scale = scale_y_5, coord_cartesian = coord_cartesian_5,
+               group_var = gend_sc, group_names = gend_names, theme = theme) +
+  raincloud_point(data = sum_stats, factor = cd_purp_sc, mn = mean)
+```
+
+
+# Well-Being
+## Eudaimonic Well-being
+### By purpose condition
+
+Plot without covariates:
+```{r}
+model <- lm(purpose_comp2 ~ cd_purp_sc, data = d.an)
+
+sum_stats <- emmeans(model, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "purpose_comp2")
+lm_emmeans(model = model, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Eudaimonic Well-being"),
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+sum_stats <- emmeans(model2, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+lm_emmeans(model = model2, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model2)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Eudaimonic Well-being"),
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+Plot without covariates:
+```{r}
+model <- lm(purpose_comp2 ~ cd_purp_sc * gend_sc, data = d.an)
+
+# is there inequality?
+emmeans(model, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(purpose_comp2) %>% rename(d_ineq_ctl = purpose_comp2) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, purpose_comp2) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+labs_y <- labs(x = "", y = "Eudaimonic Well-being")
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_y,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+# is there inequality?
+emmeans(model2, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(purpose_comp2) %>% rename(d_ineq_ctl = purpose_comp2) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model2, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, purpose_comp2) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Eudaimonic Well-being"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+
+## Life Satisfaction
+
+```{r}
+d.an$lifesat %>% describe
+```
+
+### By purpose condition
+
+Plot without covariates:
+```{r}
+model <- lm(lifesat ~ cd_purp_sc, data = d.an)
+
+sum_stats <- emmeans(model, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "lifesat")
+lm_emmeans(model = model, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Life Satisfaction"),
+                   scale = scale_y_10, coord_cartesian = coord_cartesian_10, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+sum_stats <- emmeans(model2, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+lm_emmeans(model = model2, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model2)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Life Satisfaction"),
+                   scale = scale_y_10, coord_cartesian = coord_cartesian_10, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+Plot without covariates:
+```{r}
+model <- lm(lifesat ~ cd_purp_sc * gend_sc, data = d.an)
+
+# is there inequality?
+emmeans(model, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(lifesat) %>% rename(d_ineq_ctl = lifesat) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, lifesat) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Life Satisfaction"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_10, coord_cartesian = coord_cartesian_10, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+# is there inequality?
+emmeans(model2, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(lifesat) %>% rename(d_ineq_ctl = lifesat) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model2, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, lifesat) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Life Satisfaction"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_10, coord_cartesian = coord_cartesian_10, mean_round = mean_round3)
+```
+
+
+## Happiness
+
+### By purpose condition
+
+Plot without covariates:
+```{r}
+model <- lm(happy_comp4 ~ cd_purp_sc, data = d.an)
+
+sum_stats <- emmeans(model, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "happy_comp4")
+lm_emmeans(model = model, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Happiness"),
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+sum_stats <- emmeans(model2, ~ cd_purp_sc) %>% as.tibble()
+emmeans(model2, ~ cd_purp_sc) %>% pairs
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "happy_comp4")
+lm_emmeans(model = model2, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model2)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Happiness"),
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+Plot without covariates:
+
+```{r}
+library(lsr) # Eta Squared
+
+options(contrasts = c("contr.helmert", "contr.poly"))
+model <- lm(happy_comp4 ~ cd_purp_sc * gend_sc, data = d.an)
+
+model.aov <- aov(model)
+
+model %>% summary
+model.aov %>% summary
+
+etaSquared(model.aov, type = 1, anova = F)
+```
+
+```{r}
+model <- lm(happy_comp4 ~ cd_purp_sc * gend_sc, data = d.an)
+
+# is there inequality?
+emmeans(model, ~ gend_sc | cd_purp_sc) %>% pairs(reverse = TRUE)
+cohend_ineq %>% select(happy_comp4) %>% rename(d_ineq_ctl = happy_comp4) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, happy_comp4) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Happiness"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+# is there inequality?
+emmeans(model2, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(happy_comp4) %>% rename(d_ineq_ctl = happy_comp4) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model2, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, happy_comp4) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Happiness"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+
+
+# Health
+## Overall Physical Health
+
+### By purpose condition
+
+Plot without covariates:
+```{r}
+model <- lm(healthmosoverall_comp5 ~ cd_purp_sc, data = d.an)
+
+sum_stats <- emmeans(model, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "healthmosoverall_comp5")
+lm_emmeans(model = model, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Overall Physical Health"),
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+sum_stats <- emmeans(model2, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "healthmosoverall_comp5")
+lm_emmeans(model = model2, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model2)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Overall Physical Health"),
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+Plot without covariates:
+```{r}
+model <- lm(healthmosoverall_comp5 ~ cd_purp_sc * gend_sc, data = d.an)
+
+# is there inequality?
+emmeans(model, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(healthmosoverall_comp5) %>% rename(d_ineq_ctl = healthmosoverall_comp5) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, healthmosoverall_comp5) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Overall Physical Health"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+# is there inequality?
+emmeans(model2, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(healthmosoverall_comp5) %>% rename(d_ineq_ctl = healthmosoverall_comp5) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model2, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, healthmosoverall_comp5) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Overall Physical Health"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+## Daily Stress
+```{r}
+d.an$stressdaily %>% describe
+```
+### By purpose condition
+
+Plot without covariates:
+```{r}
+model <- lm(stressdaily ~ cd_purp_sc, data = d.an)
+
+sum_stats <- emmeans(model, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "stressdaily")
+lm_emmeans(model = model, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Daily Stress"),
+                   scale = scale_y_10, coord_cartesian = coord_cartesian_10, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+sum_stats <- emmeans(model2, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "stressdaily")
+lm_emmeans(model = model2, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model2)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Daily Stress"),
+                   scale = scale_y_10, coord_cartesian = coord_cartesian_10, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+Plot without covariates:
+```{r}
+model <- lm(stressdaily ~ cd_purp_sc * gend_sc, data = d.an)
+
+# is there inequality?
+emmeans(model, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(stressdaily) %>% rename(d_ineq_ctl = stressdaily) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, stressdaily) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Daily Stress"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_10, coord_cartesian = coord_cartesian_10, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+# is there inequality?
+emmeans(model2, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(stressdaily) %>% rename(d_ineq_ctl = stressdaily) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model2, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, stressdaily) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Daily Stress"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_10, coord_cartesian = coord_cartesian_10, mean_round = mean_round3)
+```
+
+## Perceived Stress
+
+### By purpose condition
+
+Plot without covariates:
+```{r}
+model <- lm(pss_comp4 ~ cd_purp_sc, data = d.an)
+
+sum_stats <- emmeans(model, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "pss_comp4")
+lm_emmeans(model = model, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Perceived Stress"),
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+sum_stats <- emmeans(model2, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "pss_comp4")
+lm_emmeans(model = model2, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model2)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Perceived Stress"),
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+### By purpose condition and gender
+
+Plot without covariates:
+```{r}
+model <- lm(pss_comp4 ~ cd_purp_sc * gend_sc, data = d.an)
+
+# is there inequality?
+emmeans(model, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(pss_comp4) %>% rename(d_ineq_ctl = pss_comp4) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, pss_comp4) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Perceived Stress"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+# is there inequality?
+emmeans(model2, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(pss_comp4) %>% rename(d_ineq_ctl = pss_comp4) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model2, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, pss_comp4) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Perceived Stress"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_5, coord_cartesian = coord_cartesian_5, mean_round = mean_round3)
+```
+
+## Overall Mental Health
+
+### By purpose condition
+
+Plot without covariates:
+```{r}
+model <- lm(overallmentalhealth_comp5_z ~ cd_purp_sc, data = d.an)
+
+sum_stats <- emmeans(model, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "overallmentalhealth_comp5_z")
+lm_emmeans(model = model, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Overall Mental Health"),
+                   scale = scale_y_z, coord_cartesian = coord_cartesian_z, mean_round = mean_roundz)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+sum_stats <- emmeans(model2, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "overallmentalhealth_comp5_z")
+lm_emmeans(model = model2, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model2)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Overall Mental Health"),
+                   scale = scale_y_z, coord_cartesian = coord_cartesian_z, mean_round = mean_roundz)
+```
+
+### By purpose condition and gender
+
+Plot without covariates:
+```{r}
+model <- lm(overallmentalhealth_comp5_z ~ cd_purp_sc * gend_sc, data = d.an)
+
+# is there inequality?
+emmeans(model, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(overallmentalhealth_comp5_z) %>% rename(d_ineq_ctl = overallmentalhealth_comp5_z) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, overallmentalhealth_comp5_z) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Overall Mental Health"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_z, coord_cartesian = coord_cartesian_z, mean_round = mean_roundz)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+# is there inequality?
+emmeans(model2, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(overallmentalhealth_comp5_z) %>% rename(d_ineq_ctl = overallmentalhealth_comp5_z) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model2, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, overallmentalhealth_comp5_z) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "Overall Mental Health"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_z, coord_cartesian = coord_cartesian_z, mean_round = mean_roundz)
+```
+
+
+# Academic Achievement
+## 1-Year Cumulative GPA
+
+```{r}
+d.an$Y1_Sp_CumGPA %>% describe
+```
+
+### By purpose condition
+
+Plot without covariates:
+```{r}
+model <- lm(Y1_Sp_CumGPA ~ cd_purp_sc, data = d.an)
+
+sum_stats <- emmeans(model, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "Y1_Sp_CumGPA")
+lm_emmeans(model = model, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "1-Year Cumulative GPA"),
+                   scale = scale_y_4, coord_cartesian = coord_cartesian_4, mean_round = mean_round_gpa)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+sum_stats <- emmeans(model2, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "Y1_Sp_CumGPA")
+lm_emmeans(model = model2, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model2)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "1-Year Cumulative GPA"),
+                   scale = scale_y_4, coord_cartesian = coord_cartesian_4, mean_round = mean_round_gpa)
+```
+
+### By purpose condition and gender
+
+Plot without covariates:
+```{r}
+model <- lm(Y1_Sp_CumGPA ~ cd_purp_sc * gend_sc, data = d.an)
+
+# is there inequality?
+emmeans(model, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(Y1_Sp_CumGPA) %>% rename(d_ineq_ctl = Y1_Sp_CumGPA) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, Y1_Sp_CumGPA) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "1-Year Cumulative GPA"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_4, coord_cartesian = coord_cartesian_4, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+# is there inequality?
+emmeans(model2, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(Y1_Sp_CumGPA) %>% rename(d_ineq_ctl = Y1_Sp_CumGPA) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model2, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, Y1_Sp_CumGPA) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs(x = "", y = "1-Year Cumulative GPA"),
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_4, coord_cartesian = coord_cartesian_4, mean_round = mean_round3)
+```
+
+
+
+# Political Engagement
+
+## Overall Activism
+
+```{r}
+vars_activism <- quos(activism_engaged, activism_hours_use_this, activism_z_comp2)
+table.describe(d.an, vars_activism)
+```
+
+### By purpose condition
+
+Plot without covariates:
+```{r}
+labs_activism_c2 <- labs(x = "", y = "Overall Activism")
+model <- lm(activism_z_comp2 ~ cd_purp_sc, data = d.an)
+
+sum_stats <- emmeans(model, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "activism_z_comp2")
+lm_emmeans(model = model, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_activism_c2,
+                   scale = scale_y_z, coord_cartesian = coord_cartesian_z, mean_round = mean_roundz)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+sum_stats <- emmeans(model2, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "activism_z_comp2")
+lm_emmeans(model = model2, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model2)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_activism_c2,
+                   scale = scale_y_z, coord_cartesian = coord_cartesian_z, mean_round = mean_roundz)
+```
+
+### By purpose condition and gender
+
+Plot without covariates:
+```{r}
+model <- lm(activism_z_comp2 ~ cd_purp_sc * gend_sc, data = d.an)
+
+# is there inequality?
+emmeans(model, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(activism_z_comp2) %>% rename(d_ineq_ctl = activism_z_comp2) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, activism_z_comp2) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_activism_c2,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_z, coord_cartesian = coord_cartesian_z, mean_round = mean_roundz)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+# is there inequality?
+emmeans(model2, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(activism_z_comp2) %>% rename(d_ineq_ctl = activism_z_comp2) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model2, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, activism_z_comp2) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_activism_c2,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_z, coord_cartesian = coord_cartesian_z, mean_round = mean_roundz)
+```
+
+
+
+## Engaged in Activism
+
+### By purpose condition
+
+Plot without covariates:
+```{r}
+labs_activism_eng <- labs(x = "", y = "Engaged in Activism")
+model <- lm(activism_engaged ~ cd_purp_sc, data = d.an)
+
+sum_stats <- emmeans(model, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "activism_engaged")
+lm_emmeans(model = model, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_activism_eng,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + gend + hsrank)
+
+sum_stats <- emmeans(model2, ~ cd_purp_sc) %>% as.tibble()
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc)), funs(round(., 2))) %>% kable()
+cohend_cd_purp_all %>% filter(rowname == "activism_engaged")
+lm_emmeans(model = model2, x_var_ct = "cd_purp_sc") %>% pairs
+summary(model2)
+
+plot_bar_x_y(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_activism_eng,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+
+### By purpose condition and gender
+
+Plot without covariates:
+```{r}
+model <- lm(activism_engaged ~ cd_purp_sc * gend_sc, data = d.an)
+
+# is there inequality?
+emmeans(model, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(activism_engaged) %>% rename(d_ineq_ctl = activism_engaged) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, activism_engaged) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model)
+
+lm_emmeans_contrast_x(model = model, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_activism_eng,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+Plot with covariates:
+```{r}
+model2 <- update(model, . ~ . + sattoact + hsrank)
+
+# is there inequality?
+emmeans(model2, ~ gend_sc | cd_purp_sc) %>% pairs 
+cohend_ineq %>% select(activism_engaged) %>% rename(d_ineq_ctl = activism_engaged) # cohen's d
+
+# is there a treatment effect?
+sum_stats <- emmeans(model2, ~ cd_purp_sc | gend_sc) 
+pairs(sum_stats) 
+cohend_cd_purp_gend %>% select(gender, activism_engaged) # cohen's d
+sum_stats %<>% as.tibble() %>% mutate(gend_sc = factor(gend_sc, levels=c('m','f')))
+sum_stats %>% mutate_at(vars(-c(cd_purp_sc, gend_sc)), funs(round(., 2))) %>% kable()
+
+summary(model2)
+
+lm_emmeans_contrast_x(model = model2, x_var_ct = "cd_purp_sc")
+lm_emmeans_contrast_x(model = model2, x_var_ct = "gend_sc")
+
+em.means <- lm_emmeans_x_group(model = model2, x_var_ct = "cd_purp_sc", group_var_ct = "gend_sc")
+lm_interaction(emmeans = em.means)
+
+plot_bar_x_y_group(data = sum_stats, x_var = cd_purp_sc, x_labels = labels_cd_purp, 
+                   x_color = color_cd_purp,
+                   y_var = emmean, labs_y = labs_activism_eng,
+                   group_var = gend_sc, group_names = gend_names,
+                   scale = scale_y_7, coord_cartesian = coord_cartesian_7, mean_round = mean_round3)
+```
+
+
