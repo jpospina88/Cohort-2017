@@ -81,7 +81,7 @@ attr(d0$race_intlfirst_wPI, "labels")
 Number of participants by race:
 
 ```{r}
-demogs <- quos(race_nointl_wPI_USETHIS, race_intlfirst_wPI, race)
+demogs <- quos(race_nointl_wPI_USETHIS, race_intlfirst_wPI, race_all, race)
 
 d0 %>% 
   # filter(!is.na(race_nointl_wPI_USETHIS)) %>% 
@@ -253,6 +253,39 @@ d0 %>%
   demographics_pct(demogs)
 ```
 
+# Started Pre-Matriculation Intervention and Follow-Up Surveys
+
+Review variables with keyword "start":
+
+```{r}
+d0 %<>%
+  mutate(
+    startedINTV = ifelse(!is.na(t1startdate), 1, 0),
+    # startedFROSH = ifelse(!is.na(t2StartDate), 1, 0),
+    startedFROSH = ifelse(!is.na(t4StartDate), 1, 0)
+    )
+
+check_vars_by_keywords(d0, c("start"))
+```
+
+```{r}
+d1 <- d0 %>% filter(!is.na(t1startdate))
+d0 %>% count(startedINTV)
+```
+
+```{r}
+d1 <- d0 %>% filter(!is.na(t2StartDate))
+d0 %>% count(startedFROSH)
+```
+
+```{r}
+# d1 <- d0 %>% filter(!is.na(t4StartDate))
+# d0 %>% count(startedSOPH)
+```
+
+```{r}
+d0 %>% count(startedSYFUS)
+```
 
 # Export dataset with cleaned demographics
 

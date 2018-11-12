@@ -429,9 +429,9 @@ d.all.f %<>% mutate(disadv_num = atrisk_nointlwPI_regFG_USETHIS,
                     firstgen_num = firstgen_reg_USETHIS,
                     firstgen = factor(firstgen_num, levels = c(0, 1), labels = c("cont", "first")),
                     race = race_nointl_wPI_USETHIS,
-                    race_old = factor(race, levels = c(1, 2, 3, 4, 5, 7), 
+                    race_all = factor(race, levels = c(1, 2, 3, 4, 5, 7), 
                                   labels = c("asian", "black", "latino", "native", "white", "pislander")),
-                    race = ifelse(race_old == "native" | race_old == "pislander", 4, race_old) %>% 
+                    race = ifelse(race_all == "native" | race_all == "pislander", 4, race_all) %>% 
                            factor(levels = c(1, 2, 3, 4, 5), 
                                   labels = c("asian", "black", "latino", "native.pi", "white")))
 
@@ -441,7 +441,7 @@ d.all.f %>% count(iGender, gend, gend_num)
 
 d.all.f %>% count(firstgen_reg_USETHIS, firstgen_num, firstgen)
 
-d.all.f %>% count(race_nointl_wPI_USETHIS, race_old, race, race_asian, race_black, race_latino, race_native, race_white, race_pi)
+d.all.f %>% count(race_nointl_wPI_USETHIS, race_all, race, race_asian, race_black, race_latino, race_native, race_white, race_pi)
 ```
 
 ## Review conditions

@@ -190,4 +190,3 @@ corr_table_p(d0, quos(t1opportunty_interdependent_comp2, t1opportunty_joincommun
 attr(d0$t1friendsgoingtoSU, "label")
 attr(d0$t1friendsgoingtoSU, "labels")
 ```
-
