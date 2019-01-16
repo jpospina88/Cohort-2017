@@ -16,7 +16,7 @@ rm(list = ls()) # clean environment
 ```{r global options, echo=FALSE}
 knitr::opts_chunk$set(
   # fig.path = '../plots/', fig.show = 'asis', dev = 'pdf',
-  dpi = 300, 
+  dpi = 150, 
   # include = FALSE, 
   echo = FALSE, # run the code, show me only the graphs
   warning = FALSE, message = FALSE, cache = FALSE)
@@ -53,7 +53,7 @@ options(contrasts = c("contr.helmert", "contr.poly")) # ANOVA contrasts
 ```
 
 ```{r load custom functions}
-source("../../../premat_intervention_jo/Research Assistants/scripts/custom_functions.R")
+source("../../../premat_intervention_jo/Research Assistants/Cohort 2016/custom_functions/custom_functions.R")
 ```
 
 ```{r custom functions}
@@ -258,7 +258,7 @@ table.describe <- function(data, vector){
 
 ```{r custom functions save ggplot2 plots}
 name_plots <- function(name = dv){
-  str_c("../plots/plot_", name, ".pdf")
+  str_c("../plots/plot_", name, ".jpg")
 }
 
 save_plots <- function(df, plots){
@@ -269,7 +269,7 @@ map2(
   df$file_names, 
   plots, 
   ggsave, 
-  dpi = 300
+  dpi = 150
   # device = 'pdf',
    # height = 4,
    # width = 6
@@ -286,7 +286,9 @@ vars_cont <-
     t4purposeindepcomp7, 
     t4purposeindepcomp5,
     t4purpose_prosocialcomp3, 
-    t4purpose_prosocialcomp6
+    t4purpose_prosocialcomp6,
+    happy_comp4,
+    pss_comp4
     ) 
 ```
 
@@ -391,7 +393,9 @@ tribble_dv <- tribble(
   "t4purposeindepcomp7",          "Composite:\nIndependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(7 Items)",
   "t4purposeindepcomp5",          "Composite:\nIndependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(5 Items)",
   "t4purpose_prosocialcomp3",     "Composite:\nInterdependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(3 Items)",
-  "t4purpose_prosocialcomp6",     "Composite:\nInterdependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(6 Items)"
+  "t4purpose_prosocialcomp6",     "Composite:\nInterdependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(6 Items)",
+   "happy_comp4",     "Composite:\nHappiness",          seq(1, 7, 1),        c(1, 7),      2, "(4 Items)",
+   "pss_comp4",     "Composite:\nPerceived Stress",          seq(1, 7, 1),        c(1, 7),      1.5, "(4 Items)"
   )
 
 tribble_cond <- data.frame(matrix(c("cd_purp_sc"), nrow = nrow(tribble_dv)))
@@ -496,6 +500,11 @@ cohend_cond_all
 Effect sizes (Cohen's *d*) between control and purpose for males and females:
 
 ```{r}
+d %>% 
+  count(gend_num, gend_sc)
+```
+
+```{r}
 cohend_cond <- cohen.d.by(x = d %>% select(cd_purp_num, gend_num, !!!vars_cont), group = "cd_purp_num", group2 = "gend_num", alpha = .05)
 
 cohend_cond
@@ -505,12 +514,12 @@ cohend_cond
 
 ## Example
 ```{r}
-lm(t4purpose_prosocialcomp6 ~ cd_purp_sc*gend_sc, data = d) %>% summary
+lm(t4purpose_prosocialcomp6 ~ cd_purp_sc*gend_sc + sattoact + hsrank, data = d) %>% summary
 ```
 
 ```{r}
-vars_ivs <- quos(id, cd_purp_sc, gend_sc
-                 # sattoact, hsrank, hsrank_no, gender # covariates
+vars_ivs <- quos(id, cd_purp_sc, gend_sc,
+                 sattoact, hsrank # covariates
                  )
 
 d.gather <- d %>%
@@ -525,7 +534,7 @@ d.nest <-
 # d.nest$data[[1]]
 
 lm_model <- function(data){
-  lm(dv_value ~ cd_purp_sc*gend_sc, data = data)
+  lm(dv_value ~ cd_purp_sc*gend_sc + sattoact + hsrank, data = data)
 }
 
 d.nest %<>% mutate(lm_model = map(.x = data, .f = lm_model))
@@ -600,7 +609,7 @@ dvs_col %>%
 ### By Condition and Race
 ```{r}
 dvs_col_rep <- dvs_col$dv_name %>% 
-  rep(each = 4) %>% # change this number depending on the number of rows of your tidy datasets
+  rep(each = 6) %>% # change this number depending on the number of rows of your tidy datasets
   as.tibble %>% 
   rename(dv_name = value)
 
@@ -641,7 +650,7 @@ dvs_col_rep %>%
 
 # Bar Plots
 
-## By Treatment and Race
+## By Treatment and Gender
 
 ```{r}
 d.unnest_cond <-
@@ -684,7 +693,7 @@ plots <- mapply(plot_bar_x_y_group_cond_gend, # function
        3, tribble_comb["subheader"] %>% t,
        SIMPLIFY = F)
 
-plots[[1]]
+plots
 ```
 
 
