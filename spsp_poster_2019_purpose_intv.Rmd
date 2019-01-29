@@ -1,0 +1,135 @@
+---
+title: 'SPSP Poster 2019: Purpose-for-Learning Intervention'
+author: "Juan Ospina"
+date: "1/24/2019"
+output: html_document
+---
+
+```{r packages}
+library(magrittr)
+library(Hmisc)
+library(RColorBrewer)
+library(reshape2)
+library(tidyverse)
+library(emmeans) # to get adjusted means and to plot the summary statistics of models
+library(kableExtra)
+library(psych)
+library(apaTables)
+library(ez)
+library(grid) # For iterative plots
+library(gridExtra) # For iterative plots
+```
+
+```{r data files}
+d <- read_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs_6Nov2018.rds")
+options(contrasts = c("contr.helmert", "contr.poly")) # ANOVA contrasts
+
+# d %<>% filter(!is.na(cd_purp_sc))
+```
+
+```{r load custom functions}
+source("../../../premat_intervention_jo/Research Assistants/Cohort 2016/custom_functions/custom_functions.R")
+```
+
+```{r}
+# head(d)
+d1 <- 
+  d %>% 
+  filter(
+    !is.na(happy_comp4) & 
+      !is.na(cd_purp_sc) &
+      !is.na(gend_sc) &
+      !is.na(sattoact) &
+      !is.na(hsrank)
+  )
+
+d2 <- 
+  d %>% 
+  filter(
+    !is.na(pss_comp4) & 
+      !is.na(cd_purp_sc) &
+      !is.na(gend_sc) &
+      !is.na(sattoact) &
+      !is.na(hsrank)
+  )
+
+# setdiff(d1, d2)
+
+vars <- 
+  quos(
+    id, happy_comp4, pss_comp4, cd_purp_sc, gend_sc, race, sattoact, hsrank
+  )
+
+d1 %<>%
+  select(!!!vars)
+
+d2 %<>%
+  select(!!!vars)
+
+setdiff(d1, d2)
+```
+
+```{r}
+d1 %>% 
+  select(happy_comp4, pss_comp4) %>% 
+  describe()
+
+d2 %>% 
+  select(happy_comp4, pss_comp4) %>% 
+  describe()
+```
+
+```{r}
+demographics_pct(d1, quos(race))
+demographics_pct(d2, quos(race))
+
+demographics_pct(d1, quos(gend_sc))
+demographics_pct(d2, quos(gend_sc))
+
+demographics_pct(d1, quos(cd_purp_sc))
+demographics_pct(d2, quos(cd_purp_sc))
+
+demographics_pct(d %>% 
+                   filter(!is.na(cd_purp_sc)), quos(cd_purp_sc))
+
+demographics_pct(d, quos(cd_purp_sc))
+
+((228 + 220)/1717)*100; 13.3 + 12.8
+
+
+demographics_pct(d %>% 
+                   filter(!is.na(cd_purp_sc)), quos(cd_purp_sc, race))
+```
+
+```{r}
+lm_model <- 
+  lm(happy_comp4 ~ cd_purp_sc*gend_sc + sattoact + hsrank, data = d)
+
+lm_model %>% summary
+
+emmeans <- emmeans(
+  object = lm_model, 
+  specs = "cd_purp_sc", 
+  by = "gend_sc"
+)
+
+emmeans; emmeans %>% pairs
+
+lm_model <- 
+  lm(pss_comp4 ~ cd_purp_sc*gend_sc + sattoact + hsrank, data = d)
+
+lm_model %>% summary
+
+emmeans <- emmeans(
+  object = lm_model, 
+  specs = "cd_purp_sc", 
+  by = "gend_sc"
+)
+
+emmeans; emmeans %>% pairs
+
+```
+
+
+
+
