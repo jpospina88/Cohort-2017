@@ -1,0 +1,123 @@
+---
+title: "Check Participants Senior Year Survey"
+author: "Juan Ospina"
+date: "11/13/2018"
+output: html_document
+---
+
+```{r clean system, message=TRUE, warning=TRUE, include=FALSE}
+rm(list = ls()) # clean environment
+```
+
+```{r global options, echo=FALSE}
+knitr::opts_chunk$set(
+  # fig.path = 'figs/', fig.show = 'asis', dpi = 300, 
+  # include = FALSE, 
+  echo = FALSE, # run the code, show me only the graphs
+  warning = FALSE, message = FALSE, cache = FALSE)
+```
+
+```{r packages}
+library(magrittr)
+# library(Hmisc)
+library(RColorBrewer)
+library(reshape2)
+# library(MASS) # negative binomial models
+library(corrplot)
+library(tidyverse)
+library(emmeans) # to get adjusted means and to plot the summary statistics of models
+library(kableExtra)
+library(psych)
+```
+
+```{r}
+d0 <- read_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs_Frosh_Soph_Senior.rds")
+
+d1 <- read_csv("../Newest Data/Stanford_Premat__Cohort_2017__Senior_Survey-Distribution_History.csv")
+
+d2017 <- read.csv("../Senior Year Follow-up/FIntv_2017_DataForRandomSelection.csv")
+```
+
+```{r load custom functions}
+source("../../../premat_intervention_jo/Research Assistants/Cohort 2016/custom_functions/custom_functions.R")
+```
+
+```{r}
+# d0 %>% select(contains("email"))
+# d1 %>% select(contains("email"))
+
+d1 %<>% 
+  rename(
+    email = Email
+  )
+
+d1 %<>% 
+  mutate(
+    recruitedSYFUS = 1
+  )
+```
+
+```{r}
+d2 <- d0 %>%
+  left_join(d1, by = "email")
+```
+
+# Recruited participants for SYFUS of Cohort 2017
+
+```{r}
+d2 %>% 
+  count(recruitedSYFUS)
+
+demogs <- quos(race_all, race)
+
+d2 %>%
+  filter(recruitedSYFUS == 1) %>%
+  demographics_pct(demogs)
+```
+
+```{r}
+d2017 %>%
+  demographics_pct(quos(race))
+```
+
+```{r}
+d2017 %>% head
+```
+
+```{r}
+d2017 %>% 
+  demographics_pct(quos(condition))
+
+(158/ (228 + 217))*100
+```
+
+```{r}
+d1
+```
+
+```{r}
+d2$email
+
+d3 <- 
+  d2 %>% 
+  left_join(d1, by = "email")
+
+d3 %<>% 
+  filter(recruitedSYFUS)
+
+df <- 
+d2 %>% 
+  filter(recruitedSYFUS == 1)
+
+# that's the total of participants (220) that we wanted to recruit for the purpose intervention in the Senior Year Follow-Up
+df %>% 
+  filter(!is.na(cd_purp_sc)) %>% 
+  demographics_pct(quos(cd_purp_sc))
+
+
+# setdiff(d1$email, df$email)
+
+# of the 220 that we wanted to recruit, 158 were included in the analyses. Thus, the % below indicates the percentage of people that we succeded to recruit from the targeted sample above
+(158/220)*100
+```
+
