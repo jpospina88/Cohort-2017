@@ -287,8 +287,12 @@ vars_cont <-
     t4purposeindepcomp5,
     t4purpose_prosocialcomp3, 
     t4purpose_prosocialcomp6,
+    pss_comp4,
+    stressdaily,
+    overallmentalhealth_comp5_z,
     happy_comp4,
-    pss_comp4
+    lifesat,
+    purpose_comp2
     ) 
 ```
 
@@ -395,7 +399,7 @@ tribble_dv <- tribble(
   "t4purpose_prosocialcomp3",     "Composite:\nInterdependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(3 Items)",
   "t4purpose_prosocialcomp6",     "Composite:\nInterdependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(6 Items)",
    "happy_comp4",     "Composite:\nHappiness",          seq(1, 7, 1),        c(1, 7),      2, "(4 Items)",
-   "pss_comp4",     "Composite:\nPerceived Stress",          seq(1, 7, 1),        c(1, 7),      1.5, "(4 Items)"
+   "pss_comp4",     "Composite:\nPerceived Stress",          seq(1, 5, 1),        c(1, 5),      1.5, "(4 Items)"
   )
 
 tribble_cond <- data.frame(matrix(c("cd_purp_sc"), nrow = nrow(tribble_dv)))
