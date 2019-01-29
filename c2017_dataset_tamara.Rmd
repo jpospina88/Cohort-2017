@@ -33,11 +33,25 @@ library(psych)
 d0 <- read_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs_Frosh_Soph_Senior.rds")
 ```
 
+```{r load custom functions}
+source("../../../premat_intervention_jo/Research Assistants/scripts/custom_functions.R")
+```
+
+```{r eval=FALSE, include=FALSE}
+# d0 %>% 
+#   check_vars_by_keywords(c("cop"))
+```
+
+```{r eval=FALSE, include=FALSE}
+# attr(d0$t1PosEmocomp3, "label")
+# attr(d0$t1sophomore_belong, "labels")
+```
+
 ```{r}
 vars_id <- quos(id)
 
 vars_demogs <- 
-  quos(race_nointl_wPI_USETHIS, race_intlfirst_wPI, race, # race
+  quos(race_nointl_wPI_USETHIS, race_intlfirst_wPI, race, race_all, # race
        iGender, gend, # gender
        t1ses, ses, ses_working_lowmiddle, t1ses_workinglowermiddleclass, # SES
        t1hsadvantage, hs_advantage, # HS status
@@ -45,13 +59,28 @@ vars_demogs <-
        firstgen, firstgen_reg_USETHIS # first-generation status
   ) 
 
+vars_academic <-
+  quos(
+    iHSGpa, # High School GPA
+    Y1_F_CumGPA, # Cumulative GPA fall of freshman year
+    Y1_Sp_CumGPA, # Cumulative GPA spring of freshman year
+    Y1_W_CumGPA # Cumulative GPA winter of freshman year
+  )
+
 vars_premat <- 
   quos(
     t1preReasonsIndepcomp2, t1preReasons_independent,  t1preReasons_myinterest, # Independent reasons
     t1preReasonsInterdepcomp2, t1preReasons_familyproud, t1preReasons_community, # Interdependent reasons
     t1opportunty_independent_comp2, t1opportunty_exploreinterests3,  t1opportunty_becomeindepthinker4, # Independent opportunities
     t1opportunty_interdependent_comp2, t1opportunty_joincommunities1R,  t1opportunty_giveback2R, # Interdependent opportunities
-    t1friendsgoingtoSU
+    t1friendsgoingtoSU, # Friends 
+    t1fall_belng2, t1sophomore_belong, # anticipated belonging in Fall and Sophomore years
+    t1excited, t1enjoy, t1fun, t1PosEmocomp3, # Positive emotions
+    t1posfeelings_profsTAs, t1posfeelings_gettingtoknowotherSs, # Positive feelings
+    t1posfeelings_beingawayfromhome, t1posfeelings_receivingfeedback,
+    t1negfeelings_profsTAs, t1negfeelings_gettingtoknowotherSs, # Negative feelings
+    t1negfeelings_beingawayfromhome, t1negfeelings_receivingfeedback,
+    t1coping_profsTAs,  t1coping_otherSs, t1coping_beingaway, t1coping_feedback # Coping
   )
 
 vars_frosh <-
@@ -101,7 +130,7 @@ vars_senior <-
 ```{r}
 d1 <-
   d0 %>% 
-  select(!!!vars_id, !!!vars_demogs, !!!vars_premat, !!!vars_frosh, !!!vars_soph, !!!vars_senior)
+  select(!!!vars_id, !!!vars_demogs, !!!vars_academic, !!!vars_premat, !!!vars_frosh, !!!vars_soph, !!!vars_senior)
 ```
 
 ```{r}
