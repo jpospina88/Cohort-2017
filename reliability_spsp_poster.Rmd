@@ -1,0 +1,524 @@
+---
+title: "Reliability Ospina SPSP Poster"
+author: "Juan Ospina"
+date: "1/31/2019"
+output: html_document
+---
+
+```{r clean system, message=TRUE, warning=TRUE, include=FALSE}
+rm(list = ls()) # clean environment
+```
+
+```{r global options, echo=FALSE}
+knitr::opts_chunk$set(
+  # fig.path = '../plots/', fig.show = 'asis', dev = 'pdf',
+  dpi = 150, 
+  # include = FALSE, 
+  echo = FALSE, # run the code, show me only the graphs
+  warning = FALSE, message = FALSE, cache = FALSE)
+```
+
+```{r packages}
+# install.packages(c("RColorBrewer", "reshape2", "tidyverse"))
+library(haven) # package to import SPSS files in R. Useful to import SPSS files and export them as csv
+library(magrittr)
+library(Hmisc)
+# library(RColorBrewer)
+library(reshape2)
+library(tidyverse)
+library(kableExtra)
+library(psych)
+library(corrplot)
+```
+
+```{r data files}
+ds <- read_rds("../Newest Data/FIntv_2017_Comprehensive_withY1SpGradeData_withSYFUSNoT7_Cleaned_Demogs_6Nov2018.rds")
+
+ds %<>% filter(!is.na(cd_purp_sc))
+```
+
+```{r custom functions}
+alphatize <- function(data, vector){
+  temp <- 
+    data %>% 
+    select(!!!vector) %>% # note that variables in ... must be pre-quoted using quos() function
+    na.omit() %>% 
+    psych::alpha() 
+  
+  temp$total$raw_alpha %>% broman::myround(2)
+  # Example: 
+  # var_list <- quos(disp, wt, cyl)
+  # new_alpha <- alphatize(mtcars, var_list)
+}
+
+alphatize_full <- function(data, vector){
+    data %>% 
+    select(!!!vector) %>% # note that variables in ... must be pre-quoted using quos() function
+    na.omit() %>% 
+    psych::alpha() 
+}
+
+cv_compute <- function(data, cv_name, cv_vector){
+  cv_name <- enquo(cv_name)
+  data %>% 
+      rowwise() %>% 
+      mutate(!!quo_name(cv_name) := mean(c(!!!cv_vector), na.rm = TRUE)) %>% 
+      ungroup()
+}
+
+factor_analysis <- function(data, vector){
+
+  fact <- data %>% select(!!!vector)
+  
+
+ 
+
+  corr_table <- round(cor(fact, use = "pairwise.complete.obs"), digits = 3) # you need to determine how NAs should be treated. SPSS uses deleting NAs pairwise as a default, so R should do the same in order to compare the results
+
+ ?cor
+
+  corrplot(corr_table, method = "circle") # plot matrix
+
+  #scree_plot <- fa.parallel(corr_table, fm = "pa", fa = "fa", main = "Scree Plot"); scree_plot
+
+  scree_plot <- scree(corr_table, factors = TRUE, pc = FALSE, main = "Scree plot", hline = NULL, add = FALSE); scree_plot # pc: principal components, pc is used in Confirmatory Factor Analysis (CFA), instead of Exploratory Factor Analysis (EFA)
+
+  # if the Eigen value is above the cutoff in the scree_plot, then you have a factor!
+
+ 
+
+  # Begin Factor Analysis
+
+  # dim(fact); str(fact)
+
+ 
+
+  # when reviewing the output of factanal, the Factor of each item should be > .6 to consider these items as part of the composite that we want to compute.
+
+  factanal(na.omit(fact),
+
+    factors = 1, # how many factors to calculate
+
+   rotation = "varimax") # "varimax" uncorrelate the items by computing an orthogonal vector with all the items
+
+}
+
+table.describe <- function(data, vector){
+  data %>% select(!!!vector) %>% describe %>% round(., digits = 2) %>% kable(format = "html") %>% 
+    kable_styling(bootstrap_options = c("hover", "responsive"), font_size = 12, full_width = F)
+}
+
+corr_table <- function(df, vars){
+  df %>% # then
+  select(!!!vars) %>%
+  corstarsl.all() %>% 
+  rownames_to_column(., var = "var") %>% 
+  slice(-1) %>% 
+  kable(format = "html") %>% 
+  kable_styling(bootstrap_options = c("hover", "responsive"), font_size = 12, full_width = F)
+}
+
+corstarsl.all <- function(x){ 
+require(Hmisc) 
+x <- as.matrix(x) 
+R <- rcorr(x)$r 
+p <- rcorr(x)$P
+n <- rcorr(x)$n
+
+## define notions for significance levels; spacing is important.
+mystars <- ifelse(p < .001, " ***", 
+                  ifelse(p < .01, " **", 
+                         ifelse(p < .05, " *", # significant
+                                ifelse(p < 0.1, " †", # marginal
+                                       ifelse(p < 0.15, " .", " "))))) # trending
+
+## trunctuate the matrix that holds the correlations to two decimal
+R <- format(round(cbind(rep(-1.11, ncol(x)), R), 3))[,-1] 
+
+## add number of observations in parenthesis
+n.p <- n %>% as.data.frame() %>% 
+  mutate_all(funs(paste0("(", . ,")"))) %>% 
+  as.matrix()
+
+## build a new matrix that includes the correlations with their apropriate stars 
+Rnew <- matrix(paste(R, mystars, n.p, sep=" "), ncol=ncol(x)) 
+diag(Rnew) <- paste(diag(R), " ", sep="") 
+rownames(Rnew) <- colnames(x) 
+colnames(Rnew) <- paste(colnames(x), "", sep="") 
+
+## remove upper triangle
+Rnew <- as.matrix(Rnew)
+Rnew[upper.tri(Rnew, diag = TRUE)] <- ""
+Rnew <- as.data.frame(Rnew) 
+
+## remove last column and return the matrix (which is now a data frame)
+Rnew <- cbind(Rnew[1:length(Rnew)-1])
+return(Rnew) 
+}
+```
+
+```{r raincloud plots}
+n_obs <- function(x) sum(!is.na(x))
+mn <- function(x) round(mean(x, na.rm = TRUE), 2)
+mdn <- function(x) median(x, na.rm = TRUE)
+std <- function(x) round(sd(x, na.rm = TRUE), 2)
+lb <- function(x) round(mean(x, na.rm = TRUE) - sd(x, na.rm = TRUE), 2)
+ub <- function(x) round(mean(x, na.rm = TRUE) + sd(x, na.rm = TRUE), 2)
+
+sum_stats_round_new <- function(data, factors, variables) {
+  ftr <- enquo(factors)
+  var <- enquo(variables)
+  
+  data %>% 
+    group_by(!!!ftr) %>% 
+    summarise(
+      n = n_obs(!!!var),
+      mean = mn(!!!var),
+      median = mdn(!!!var),
+      sd = std(!!!var),
+      lower = lb(!!!var),
+      upper = ub(!!!var))
+}
+
+geom_flat_violin <-
+  function(mapping = NULL,
+           data = NULL,
+           stat = "ydensity",
+           position = "dodge",
+           trim = TRUE,
+           scale = "area",
+           show.legend = NA,
+           inherit.aes = TRUE,
+           ...) {
+    ggplot2::layer(
+      data = data,
+      mapping = mapping,
+      stat = stat,
+      geom = GeomFlatViolin,
+      position = position,
+      show.legend = show.legend,
+      inherit.aes = inherit.aes,
+      params = list(trim = trim,
+                    scale = scale,
+                    ...)
+    )
+  }
+
+GeomFlatViolin <-
+  ggproto(
+    "GeomFlatViolin",
+    Geom,
+    setup_data = function(data, params) {
+      data$width <- data$width %||%
+        params$width %||% (resolution(data$x, FALSE) * 0.9)
+      
+      # ymin, ymax, xmin, and xmax define the bounding rectangle for each group
+      data %>%
+        dplyr::group_by(.data = ., group) %>%
+        dplyr::mutate(
+          .data = .,
+          ymin = min(y),
+          ymax = max(y),
+          xmin = x,
+          xmax = x + width / 2
+        )
+    },
+    
+    draw_group = function(data, panel_scales, coord)
+    {
+      # Find the points for the line to go all the way around
+      data <- base::transform(data,
+                              xminv = x,
+                              xmaxv = x + violinwidth * (xmax - x))
+      
+      # Make sure it's sorted properly to draw the outline
+      newdata <-
+        base::rbind(
+          dplyr::arrange(.data = base::transform(data, x = xminv), y),
+          dplyr::arrange(.data = base::transform(data, x = xmaxv), -y)
+        )
+      
+      # Close the polygon: set first and last point the same
+      # Needed for coord_polar and such
+      newdata <- rbind(newdata, newdata[1,])
+      
+      ggplot2:::ggname("geom_flat_violin",
+                       GeomPolygon$draw_panel(newdata, panel_scales, coord))
+    },
+    
+    draw_key = draw_key_polygon,
+    
+    default_aes = ggplot2::aes(
+      weight = 1,
+      colour = "grey20",
+      fill = "white",
+      size = 0.5,
+      alpha = NA,
+      linetype = "solid"
+    ),
+    
+    required_aes = c("x", "y")
+  )
+```
+## Well-being
+
+### Eudaimonic Well-being
+#### Summarizing items
+```{r}
+vector_purpose <- quos(purpose_meaning, purpose_contribute)
+
+table.describe(ds, vector_purpose)
+```
+
+#### Correlational analysis
+
+```{r}
+corr_table(ds, vector_purpose)
+```
+
+#### Compute and review Eudaimonic Well-being Composite
+```{r}
+ds %<>% cv_compute(cv_name = purpose_comp2, cv_vector = vector_purpose)
+```
+
+```{r}
+hist(ds$purpose_comp2)
+boxplot(ds$purpose_comp2)
+```
+
+| Eudaimonic wellbeing (purpose_comp2) | |
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Not at all ... 5 = A great deal |
+| Items | 1.      Right now, how much do you feel that your life has a sense of direction or meaning to it? |
+|       | 2.      Right now, how much do you feel that you have something to contribute to society? |
+
+
+### Happiness
+
+```{r}
+ds %<>% 
+  mutate(happy_unhappy_r_use_this = 8 - happy_unhappy_r)
+```
+
+#### Summarizing items
+```{r}
+vector_happy <- quos(happy_person, happy_comppeer, happy_enjoylife, happy_unhappy_r_use_this)
+
+table.describe(ds, vector_happy)
+```
+
+#### Reliability analysis
+
+```{r}
+alpha_happy <- alphatize(ds, vector_happy) # Alpha: 0.88
+
+alphatize_full(ds, vector_happy)
+
+corr_table(ds, vector_happy)
+```
+
+#### Factor analysis
+```{r}
+factor_analysis(ds, vector_happy) ##Items 4 and 6 don't fit. 
+```
+
+#### Compute and review Happiness Composite
+```{r}
+ds %<>% cv_compute(cv_name = happy_comp4, cv_vector = vector_happy)
+```
+
+```{r}
+hist(ds$happy_comp4) # fairly normally distributed.
+boxplot(ds$happy_comp4)
+```
+
+| Happiness (happy_comp4) | ${\alpha}$ = `r alpha_happy`|
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Not a very happy person/Less happy/Not at all ... 7 = A very happy person/More happy/A great deal |
+| Items | 1.      In general, I consider myself: |
+|       | 2.      Compared with most of my peers, I consider myself: |
+|       | 3.      Some people are generally very happy. They enjoy life regardless of what is going on, getting the most out of everything. To what extent does this characterization describe you? |
+|       | 4.      Some people are generally not very happy. Although they are not depressed, they never seem as happy as they might be. To what extent does this characterization describe you? (reversed) |
+
+
+
+## Health
+### Overall Physical Health
+
+```{r}
+ds %<>% 
+  mutate(
+    health_sickeasier_r = health_health_sickeasierR,
+    health_worse_r = health_health_worse_r,
+    health_healthyanybody = health_health_healthyanybody,
+    health_excellent = health_health_excellent,
+    health_sickeasier_r_use_this = 6 - health_sickeasier_r,
+    health_worse_r_use_this = 6 - health_worse_r)
+```
+
+#### Summarizing items
+```{r}
+vector_healthmosoverall <- quos(health_overall, health_sickeasier_r_use_this, health_healthyanybody, health_worse_r_use_this, health_excellent)
+
+table.describe(ds, vector_healthmosoverall)
+```
+
+#### Reliability analysis
+
+```{r}
+alpha_healthmosoverall <- alphatize(ds, vector_healthmosoverall) # Alpha: 0.77
+
+alphatize_full(ds, vector_healthmosoverall)
+
+corr_table(ds, vector_healthmosoverall)
+
+health <- ds %>% filter(startedSYFUS == 1) %>%  select(starts_with("health"))
+rm(health)
+```
+
+#### Factor analysis
+```{r}
+factor_analysis(ds, vector_healthmosoverall)
+```
+
+#### Compute and review Overall Physical Health Composite
+```{r}
+ds %<>% cv_compute(cv_name = healthmosoverall_comp5, cv_vector = vector_healthmosoverall)
+```
+
+```{r}
+hist(ds$healthmosoverall_comp5)
+boxplot(ds$healthmosoverall_comp5)
+```
+
+| Overall Physical Health (healthmosoverall_comp5) | ${\alpha}$ = `r alpha_healthmosoverall`|
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Poor/Definitely false ... 5 = Excellent/Definitely true | 
+| Items | 1. In general, would you say your health is:  |
+|       | 2.      I seem to get sick a little easier than other people. (reversed) |
+|       | 3.      I am as healthy as anybody I know. |
+|       | 4.      I expect my health to get worse. (reversed) |
+|       | 5.      My health is excellent. | 
+
+### Perceived Stress Scale (Secondary Appraisal)
+
+```{r}
+ds %<>% 
+  mutate(pss_handle_r_use_this = 6- pss_handle_r,
+         pss_yourway_r_use_this = 6 - pss_yourway_r)
+```
+
+#### Summarizing items
+```{r}
+vector_pss <- quos(pss_unable, pss_handle_r_use_this, pss_yourway_r_use_this, pss_difficulties)
+
+table.describe(ds, vector_pss)
+```
+
+#### Reliability analysis
+
+```{r}
+alpha_pss <- alphatize(ds, vector_pss)
+
+alphatize_full(ds, vector_pss)
+
+corr_table(ds, vector_pss)
+```
+
+#### Factor analysis
+```{r}
+factor_analysis(ds, vector_pss) ##Items 4 and 6 don't fit. 
+```
+
+#### Compute and review PSS Composite
+```{r}
+ds %<>% cv_compute(cv_name = pss_comp4, cv_vector = vector_pss)
+```
+
+```{r}
+hist(ds$pss_comp4)
+boxplot(ds$pss_comp4)
+```
+
+| Perceived stress scale (pss_comp4) | ${\alpha}$ = `r alpha_pss`|
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | 1 = Never ... 5 = Very often |
+| Items | 1.      In the last month of school, how often have you felt that you were unable to control the important things in your life? |
+|       | 2.      In the last month of school, how often have you felt confident about your ability to handle your personal problems? (reversed) |
+|       | 3.      In the last month of school, how often have you felt that things were going your way? (reversed) |
+|       | 4.      In the last month of school, how often have you felt difficulties were piling up so high that you could not overcome them? |
+
+### Overall Mental Health
+
+```{r}
+ds %<>% 
+  mutate(
+    screener_anxnervous = screener_screener_anxnervous,
+    screener_anxworry = screener_screener_anxworry,
+    screener_deplittleinterest = screener_screener_dep_littleinterest,
+    screener_dephopeless = screener_screener_dephopelessness,
+    screener_anxnervous_new_scale = screener_anxnervous - 1,
+    screener_anxworry_new_scale = screener_anxworry - 1,
+    screener_deplittleinterest_new_scale = screener_deplittleinterest - 1,
+    screener_dephopeless_new_scale = screener_dephopeless - 1,
+    screener_anxnervous_new_scale_r = 4 - screener_anxnervous,
+    screener_anxworry_new_scale_r = 4 - screener_anxworry,
+    screener_deplittleinterest_new_scale_r = 4 - screener_deplittleinterest,
+    screener_dephopeless_new_scale_r = 4 - screener_dephopeless,
+    mhealthgeneral_z = scale(mhealth_general),
+    screener_anxnervous_new_scale_r_z = scale(screener_anxnervous_new_scale_r),
+    screener_anxworry_new_scale_r_z = scale(screener_anxworry_new_scale_r),
+    screener_deplittleinterest_new_scale_r_z = scale(screener_deplittleinterest_new_scale_r),
+    screener_dephopeless_new_scale_r_z = scale(screener_dephopeless_new_scale_r))
+```
+
+#### Summarizing items
+```{r}
+vector_overallmentalhealth_nz <- quos(mhealth_general, screener_anxnervous_new_scale_r,
+    screener_anxworry_new_scale_r,
+    screener_deplittleinterest_new_scale_r,
+    screener_dephopeless_new_scale_r)
+
+table.describe(ds, vector_overallmentalhealth_nz)
+
+vector_overallmentalhealth <- quos(mhealthgeneral_z, screener_anxnervous_new_scale_r_z, screener_anxworry_new_scale_r_z, screener_deplittleinterest_new_scale_r_z, screener_dephopeless_new_scale_r_z)
+
+table.describe(ds, vector_overallmentalhealth)
+```
+
+#### Reliability analysis
+```{r}
+alpha_overallmentalhealth <- alphatize(ds, vector_overallmentalhealth) # Alpha: 0.89
+
+alphatize_full(ds, vector_overallmentalhealth)
+
+corr_table(ds, vector_overallmentalhealth)
+```
+
+#### Factor analysis
+```{r}
+factor_analysis(ds, vector_overallmentalhealth)
+```
+
+#### Compute and review Overall Mental Health Composite
+```{r}
+ds %<>% cv_compute(cv_name = overallmentalhealth_comp5_z, cv_vector = vector_overallmentalhealth)
+```
+
+```{r}
+hist(ds$overallmentalhealth_comp5_z)
+boxplot(ds$overallmentalhealth_comp5_z)
+```
+
+| Overall Mental Health (overallmentalhealth_comp5_z) | ${\alpha}$ = `r alpha_overallmentalhealth`|
+|:---------------------|:--------------------------------------------------------------------------------------|
+| Scale | Standardized (z-scored) | 
+| Scale | 1 = Poor ... 5 = Excellent | 
+| Item  | 1. In general, would you say your mental health is: |
+| Scale | 0 = Not at all ... 3 = Nearly every day | 
+|       | Over the last 2 weeks, how often have you been bothered by the following problems? |
+| Items | 2.      Feeling nervous, anxious, or on edge. (reversed) |
+|       | 3.      Not being able to stop or control worrying. (reversed) |
+|       | 4.      Little interest or pleasure in doing things. (reversed) |
+|       | 5.      Feeling down, depressed, or hopeless. (reversed) | 
+Note: First, I reverse coded items 2 to 5. Then, I standardized each individual item. And finally, I averaged all of them together.
