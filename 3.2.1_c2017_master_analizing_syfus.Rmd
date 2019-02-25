@@ -281,10 +281,19 @@ map2(
 ```{r}
 vars_cont <- 
   quos(
+    t1preReasons_community,
+    t1preReasons_familyproud,
+    t1preReasonsInterdepcomp2,
+    t1opportunty_giveback2R,
+    t1opportunty_joincommunities1R,
+    t1opportunty_interdependent_comp2,
     t4indepcomp4,
     t4interdepcomp4,
     t4purposeindepcomp7, 
     t4purposeindepcomp5,
+    t4purpose_familyproud, 
+    t4purpose_giveback, 
+    t4purpose_helpfamily,
     t4purpose_prosocialcomp3, 
     t4purpose_prosocialcomp6,
     pss_comp4,
@@ -311,6 +320,19 @@ https://stats.idre.ucla.edu/r/library/r-library-contrast-coding-systems-for-cate
 
 ## Overall
 ```{r}
+d1 <- d
+
+d %<>% 
+  filter(
+    !is.na(cd_purp_sc) &
+      !is.na(gend_sc) &
+      !is.na(sattoact) &
+      !is.na(hsrank) &
+      !is.na(pss_comp4) &
+      !is.na(happy_comp4)
+    )
+
+
 d %>% 
   select(!!!vars_cont) %>% 
   describe %>% 
@@ -392,14 +414,23 @@ error_bar <- geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 
 tribble_dv <- tribble(
   ~dv,                            ~dv_name,                             ~scale,              ~limit,       ~position,     ~subheader,
   #------------------------------|-------------------------------------|--------------------|-------------|----------
-  "t4indepcomp4",                 "Composite:\nIndependent Opportunities",          seq(1, 5, 1),        c(1, 5),      1.5, "",
-  "t4interdepcomp4",              "Composite:\nInterdependent Opportunities",          seq(1, 5, 1),        c(1, 5),      1.5, "",
-  "t4purposeindepcomp7",          "Composite:\nIndependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(7 Items)",
-  "t4purposeindepcomp5",          "Composite:\nIndependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(5 Items)",
-  "t4purpose_prosocialcomp3",     "Composite:\nInterdependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(3 Items)",
-  "t4purpose_prosocialcomp6",     "Composite:\nInterdependent Purpose",          seq(1, 5, 1),        c(1, 5),      1.5, "(6 Items)",
-   "happy_comp4",     "Composite:\nHappiness",          seq(1, 7, 1),        c(1, 7),      2, "(4 Items)",
-   "pss_comp4",     "Composite:\nPerceived Stress",          seq(1, 5, 1),        c(1, 5),      1.5, "(4 Items)"
+  "t1preReasons_community",       "Pre-Reasons: Give to Community (T1)",          seq(1, 5, 1),        c(1, 5),      1.5, "",
+  "t1preReasons_familyproud",       "Pre-Reasons: Family Proud (T1)",          seq(1, 5, 1),        c(1, 5),      1.5, "",
+  "t1preReasonsInterdepcomp2",       "Pre-Reasons: Interdependent (T1)",          seq(1, 5, 1),        c(1, 5),      1.5, "",
+  "t1opportunty_giveback2R",       "Opportunities: Give to Community (T1)",          seq(1, 7, 1),        c(1, 7),      1.5, "",
+  "t1opportunty_joincommunities1R",       "Opportunities: Join Communities (T1)",          seq(1, 7, 1),        c(1, 7),      1.5, "",
+  "t1opportunty_interdependent_comp2",       "Opportunities: Interdependent (T1)",          seq(1, 7, 1),        c(1, 7),      1.5, "(2 Items)",
+  "t4indepcomp4",                 "Independent Opportunities (T4)",          seq(1, 5, 1),        c(1, 5),      1.5, "",
+  "t4interdepcomp4",              "Interdependent Opportunities (T4)",          seq(1, 5, 1),        c(1, 5),      1.5, "",
+  "t4purposeindepcomp7",          "Independent Purpose (T4)",          seq(1, 5, 1),        c(1, 5),      1.5, "(7 Items)",
+  "t4purposeindepcomp5",          "Independent Purpose (T4)",          seq(1, 5, 1),        c(1, 5),      1.5, "(5 Items)",
+  "t4purpose_familyproud",       "Interdependent Purpose: Family Proud (T4)",          seq(1, 5, 1),        c(1, 5),      1.5, "",
+  "t4purpose_giveback",       "Interdependent Purpose: Give Back (T4)",          seq(1, 5, 1),        c(1, 5),      1.5, "",
+  "t4purpose_helpfamily",       "Interdependent Purpose: Help Family (T4)",          seq(1, 5, 1),        c(1, 5),      1.5, "",
+  "t4purpose_prosocialcomp3",     "Interdependent Purpose (T4)",          seq(1, 5, 1),        c(1, 5),      1.5, "(3 Items)",
+  "t4purpose_prosocialcomp6",     "Interdependent Purpose (T4)",          seq(1, 5, 1),        c(1, 5),      1.5, "(6 Items)",
+   "happy_comp4",     "Happiness",          seq(1, 7, 1),        c(1, 7),      2, "(4 Items)",
+   "pss_comp4",     "Perceived Stress",          seq(1, 5, 1),        c(1, 5),      1.5, "(4 Items)"
   )
 
 tribble_cond <- data.frame(matrix(c("cd_purp_sc"), nrow = nrow(tribble_dv)))
@@ -418,7 +449,7 @@ theme <- theme(strip.text = black1,
                axis.text = element_text(size = 22, family = "Helvetica"),
                axis.title = element_text(size = 22, family = "Helvetica"), 
                strip.text.x = element_text(size = 22, colour = "white", family = "Helvetica"),
-               plot.title = element_text(size = 22, hjust = 0.5),
+               plot.title = element_text(size = 26, hjust = 0.5),
                plot.subtitle = element_text(size = 15, hjust = 0.5),
                panel.grid.major = element_blank(), 
                panel.grid.minor = element_blank(),
@@ -430,7 +461,9 @@ theme <- theme(strip.text = black1,
                legend.key.size = unit(1, 'lines')
                )
 
-plot_raincloud_map_cond_gend <- function(ftr, var, y_lab, scales, limit, subheader) d %>% 
+plot_raincloud_map_cond_gend <- function(ftr, var, y_lab, scales, limit 
+                                         # subheader
+                                         ) d %>% 
   filter(!is.na(get(var))) %>% 
   ggplot(aes(y = get(var), x = get(ftr), fill = get(ftr))) +
   raincloud_violin +
@@ -446,13 +479,16 @@ plot_raincloud_map_cond_gend <- function(ftr, var, y_lab, scales, limit, subhead
   coord_cartesian(ylim = limit) +
   scale_y_continuous(breaks = scales) +
   facet_grid(, vars(gend_sc), labeller = as_labeller(gend_names)) + # ignore warning, this is to make the plot facet the variables in the way that we want it
-  ylab("") + ggtitle(y_lab) + labs(subtitle = subheader)
+  ylab("") + ggtitle(y_lab) 
+# + labs(subtitle = subheader)
 
 plots <- 
   mapply(plot_raincloud_map_cond_gend, # function
          tribble_comb[,"cd_purp_sc"] %>% t, tribble_comb[,"dv"] %>% t, # arguments
          tribble_comb[,"dv_name"] %>% t, tribble_comb[,"scale"] %>% t, 
-         tribble_comb[,"limit"] %>% t, tribble_comb[,"subheader"] %>% t, SIMPLIFY = F)
+         tribble_comb[,"limit"] %>% t, 
+         # tribble_comb[,"subheader"] %>% t,
+         SIMPLIFY = F)
 
 plots
 ```
@@ -647,6 +683,18 @@ dvs_col_rep <- dvs_col$dv_name %>%
 
 dvs_col_rep %>% 
   bind_cols(d.nest$emmean_cond_sc_df %>% bind_rows) %>% 
+  mutate(
+    n = df + 6, # change this number if you change the number of covariates of the model
+    # d = estimate/(sqrt(n)*SE)
+    d = (2 * t.ratio)/sqrt(n)
+    ) %>%  
+  round_table(
+    quos(
+      dv_name,
+      contrast,
+      gend_sc
+      ),
+    2) %>% 
   kable_format
 
 # d.nest$emmean_cond_sc_df[[1]]
@@ -668,7 +716,9 @@ guides_no <- guides(fill = FALSE, color = FALSE)
 
 plot_bar_x_y_group_cond_gend <- function(ftr, var, y_lab, scales, limit, position,
                                          # bar_border, 
-                                         decimal, subheader) d.unnest_cond %>% 
+                                         decimal
+                                         # subheader
+                                         ) d.unnest_cond %>% 
   filter(!is.na(get(var))) %>% 
   ggplot(aes(x = get(ftr), y = get(var), color = get(ftr), group = get(ftr))) + # Remember to add get()
   # geom_bar(position = pd1, stat = "identity", colour = "black") + 
@@ -684,17 +734,18 @@ plot_bar_x_y_group_cond_gend <- function(ftr, var, y_lab, scales, limit, positio
   facet_grid(, vars(gend_sc), labeller = as_labeller(gend_names)) + # ignore warning, this is to make the plot facet the variables in the way that we want it
   ylab("") + ggtitle(y_lab) + 
   labels_cond +
-  color_cond + xlab("") + theme + 
+  color_cond + xlab("") + 
   cond_legend +
-  theme + guides_no +
-  labs(subtitle = subheader)
+  theme + guides_no 
+# +labs(subtitle = subheader)
 
 plots <- mapply(plot_bar_x_y_group_cond_gend, # function
        tribble_comb["cd_purp_sc"] %>% t, tribble_comb["dv"] %>% t, # arguments
        tribble_comb["dv_name"] %>% t, tribble_comb["scale"] %>% t, 
        tribble_comb["limit"] %>% t, tribble_comb["position"] %>% t, 
        # 0.02, 
-       3, tribble_comb["subheader"] %>% t,
+       3, 
+       # tribble_comb["subheader"] %>% t,
        SIMPLIFY = F)
 
 plots
